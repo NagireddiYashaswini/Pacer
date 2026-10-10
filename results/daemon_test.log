@@ -1,0 +1,27 @@
+=======================================================================
+  Measured-Speedup-Aware Hybrid CPU Scheduling Daemon (hybridsched)    
+=======================================================================
+[1;32m[INFO] [3787.434 s] [0mNative hybrid PMU sysfs not found (homogeneous or virtual CPU detected).
+[1;32m[INFO] [3787.434 s] [0mLoaded P/E core configuration from config/daemon.conf
+[1;32m[INFO] [3787.434 s] [0mIntel RAPL package sysfs (/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj) not accessible (errno=13: Permission denied). Activating energy model fallback.
+[1;32m[INFO] [3787.434 s] [0mHybrid Scheduler Daemon initialized successfully.
+[1;32m[INFO] [3787.434 s] [0mConfig: SampleInterval=250 ms, Cooldown=1500 ms, Hysteresis=2 ticks, MPKI_Threshold=15.0
+==================== CPU TOPOLOGY SUMMARY ====================
+Total Online CPUs: 36
+Hybrid Hardware:   NO (Emulated/Partitioned)
+P-Core Pool (8):  0-7
+E-Core Pool (10):  8-17
+Sample Freq:       CPU 0: 4600000 kHz | CPU 8: 4600000 kHz
+==============================================================
+[1;32m[INFO] [3787.434 s] [0mNo specific target PID specified (--pid). Daemon will scan and monitor workloads.
+[1;32m[INFO] [3787.434 s] [0mAdaptive Scheduling Daemon loop running (tick = 200 ms)...
+[1;32m[INFO] [3788.235 s] [0mAdded target PID 19968 to scheduler monitoring pool.
+[1;32m[INFO] [3788.235 s] [0m[THREAD ATTACH] Monitored PID 19968 -> TID 19968 attached (Initial Core 3: P-Core)
+[1;32m[INFO] [3788.235 s] [0m[THREAD ATTACH] Monitored PID 19968 -> TID 19969 attached (Initial Core 4: P-Core)
+[1;32m[INFO] [3788.235 s] [0m[1;35m[MIGRATION #1] TID 19968 moved: P-Core (CPU 3) -> E-Core | Reason: EDP_OPTIMAL_E(IPC=0.00) (IPC=0.00, MPKI=1.0)[0m
+[1;32m[INFO] [3789.037 s] [0m[1;35m[MIGRATION #1] TID 19969 moved: P-Core (CPU 4) -> E-Core | Reason: MEM_STALL_GUARD(MPKI=28.0>15.0) (IPC=0.35, MPKI=28.0)[0m
+[1;32m[INFO] [3790.040 s] [0m[1;35m[MIGRATION #2] TID 19969 moved: E-Core (CPU 14) -> P-Core | Reason: COMPUTE_P_BOOST(IPC=2.60) (IPC=2.60, MPKI=0.2)[0m
+[1;32m[INFO] [3791.042 s] [0m[1;35m[MIGRATION #3] TID 19969 moved: P-Core (CPU 4) -> E-Core | Reason: MEM_STALL_GUARD(MPKI=28.0>15.0) (IPC=0.35, MPKI=28.0)[0m
+
+[1;32m[INFO] [3792.481 s] [0mReceived shutdown signal. Stopping scheduler daemon...
+[1;32m[INFO] [3792.481 s] [0mHybrid Scheduler Daemon shut down cleanly (Total Migrations: 4).
