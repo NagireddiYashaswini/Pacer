@@ -13,6 +13,9 @@ static void parse_daemon_config(daemon_config_t *cfg, const char *path) {
     cfg->hysteresis_ticks = 2;
     cfg->enable_edp_optimization = true;
     cfg->p_core_power_multiplier = 2.5;
+    cfg->enable_predictive_scheduler = true;
+    cfg->migration_cost_ms = DEFAULT_MIGRATION_COST_MS;
+    cfg->min_profitable_dwell_ms = DEFAULT_MIN_PROFITABLE_DWELL_MS;
     strncpy(cfg->p_cores_str, "0-7", sizeof(cfg->p_cores_str));
     strncpy(cfg->e_cores_str, "8-17", sizeof(cfg->e_cores_str));
 
@@ -31,6 +34,9 @@ static void parse_daemon_config(daemon_config_t *cfg, const char *path) {
             else if (strcmp(key, "phase_mean_shift_threshold") == 0) cfg->phase_mean_shift_threshold = atof(val);
             else if (strcmp(key, "cooldown_ms") == 0) cfg->cooldown_ms = atoi(val);
             else if (strcmp(key, "hysteresis_ticks") == 0) cfg->hysteresis_ticks = atoi(val);
+            else if (strcmp(key, "enable_predictive_scheduler") == 0) cfg->enable_predictive_scheduler = (strcmp(val, "true") == 0 || atoi(val) == 1);
+            else if (strcmp(key, "migration_cost_ms") == 0) cfg->migration_cost_ms = atof(val);
+            else if (strcmp(key, "min_profitable_dwell_ms") == 0) cfg->min_profitable_dwell_ms = atof(val);
             else if (strcmp(key, "p_cores") == 0) strncpy(cfg->p_cores_str, val, sizeof(cfg->p_cores_str));
             else if (strcmp(key, "e_cores") == 0) strncpy(cfg->e_cores_str, val, sizeof(cfg->e_cores_str));
         }
@@ -61,11 +67,18 @@ int daemon_init(scheduler_daemon_t *daemon, const char *config_file) {
         fflush(daemon->telemetry_csv);
     }
 
+    daemon->total_ticks = 0;
+    daemon->total_tick_time_ns = 0;
+    daemon->max_tick_time_ns = 0;
+    daemon->min_tick_time_ns = UINT64_MAX;
+
     daemon->running = true;
     LOG_INFO("Hybrid Scheduler Daemon initialized successfully.");
-    LOG_INFO("Config: SampleInterval=%d ms, Cooldown=%d ms, Hysteresis=%d ticks, MPKI_Threshold=%.1f",
+    LOG_INFO("Config: SampleInterval=%d ms, Cooldown=%d ms, Hysteresis=%d ticks, MPKI_Threshold=%.1f, Predictive=%s (Cost=%.1f ms)",
              daemon->config.sampling_interval_ms, daemon->config.cooldown_ms,
-             daemon->config.hysteresis_ticks, daemon->config.mpki_threshold);
+             daemon->config.hysteresis_ticks, daemon->config.mpki_threshold,
+             daemon->config.enable_predictive_scheduler ? "ENABLED" : "DISABLED",
+             daemon->config.migration_cost_ms);
     return 0;
 }
 
@@ -148,6 +161,10 @@ void daemon_discover_threads(scheduler_daemon_t *daemon) {
                                     daemon->config.phase_variance_threshold,
                                     daemon->config.phase_mean_shift_threshold);
 
+                /* Initialize Online Phase Predictor (Stage 3) */
+                predictor_init(&new_t->predictor, 0.5, 0.7, daemon->config.migration_cost_ms);
+                new_t->predictor.min_profitable_dwell_ms = daemon->config.min_profitable_dwell_ms;
+
                 /* Classify initial core pool */
                 int cur_cpu = pmu_get_thread_cpu(pid, tid);
                 new_t->current_pool = topology_get_core_type(&daemon->topo, cur_cpu);
@@ -190,27 +207,48 @@ void daemon_sample_and_schedule_tick(scheduler_daemon_t *daemon) {
         t->last_metrics = metrics;
         t->last_phase_stats = pstats;
 
+        /* Stage 3: Update Online Phase Predictor */
+        predictor_update_metrics(&t->predictor, metrics.ipc, metrics.mpki,
+                                 (double)daemon->config.sampling_interval_ms, (double)now_ms);
+
         /* ================= DECISION ENGINE ================= */
         core_type_t desired_pool = t->current_pool;
-        char decision_reason[64] = "STABLE";
+        char decision_reason[96] = "STABLE";
+        bool is_proactive_migration = false;
 
-        /* 1. Memory-Stall Penalty Awareness (LLC miss & MPKI filter) */
-        if (metrics.mpki >= daemon->config.mpki_threshold) {
-            desired_pool = CORE_TYPE_E;
-            snprintf(decision_reason, sizeof(decision_reason),
-                     "MEM_STALL_GUARD(MPKI=%.1f>%.1f)", metrics.mpki, daemon->config.mpki_threshold);
+        /* If Predictive Scheduler is enabled, evaluate proactive policy first */
+        if (daemon->config.enable_predictive_scheduler) {
+            prediction_decision_t pdec = predictor_evaluate_scheduling(&t->predictor, t->current_pool);
+            if (pdec.migration_profitable) {
+                desired_pool = pdec.recommended_core_type;
+                is_proactive_migration = true;
+                snprintf(decision_reason, sizeof(decision_reason),
+                         "PRED_PROACTIVE(%s, P=%.2f, Tau=%.0fms)",
+                         predictor_phase_to_str(pdec.predicted_next_phase),
+                         pdec.confidence, pdec.expected_dwell_ms);
+            }
         }
-        /* 2. Compute-bound EDP Optimization */
-        else if (metrics.mpki < 5.0 && metrics.ipc >= 1.2) {
-            desired_pool = CORE_TYPE_P;
-            snprintf(decision_reason, sizeof(decision_reason),
-                     "COMPUTE_P_BOOST(IPC=%.2f)", metrics.ipc);
-        }
-        /* 3. EDP Energy-Saving on Low-IPC non-compute threads */
-        else if (metrics.ipc < 0.6 && daemon->config.enable_edp_optimization) {
-            desired_pool = CORE_TYPE_E;
-            snprintf(decision_reason, sizeof(decision_reason),
-                     "EDP_OPTIMAL_E(IPC=%.2f)", metrics.ipc);
+
+        /* Fallback to reactive decision if no proactive decision was made */
+        if (!is_proactive_migration) {
+            /* 1. Memory-Stall Penalty Awareness (LLC miss & MPKI filter) */
+            if (metrics.mpki >= daemon->config.mpki_threshold) {
+                desired_pool = CORE_TYPE_E;
+                snprintf(decision_reason, sizeof(decision_reason),
+                         "MEM_STALL_GUARD(MPKI=%.1f>%.1f)", metrics.mpki, daemon->config.mpki_threshold);
+            }
+            /* 2. Compute-bound EDP Optimization */
+            else if (metrics.mpki < 5.0 && metrics.ipc >= 1.2) {
+                desired_pool = CORE_TYPE_P;
+                snprintf(decision_reason, sizeof(decision_reason),
+                         "COMPUTE_P_BOOST(IPC=%.2f)", metrics.ipc);
+            }
+            /* 3. EDP Energy-Saving on Low-IPC non-compute threads */
+            else if (metrics.ipc < 0.6 && daemon->config.enable_edp_optimization) {
+                desired_pool = CORE_TYPE_E;
+                snprintf(decision_reason, sizeof(decision_reason),
+                         "EDP_OPTIMAL_E(IPC=%.2f)", metrics.ipc);
+            }
         }
 
         /* Log telemetry for plotting */
@@ -230,29 +268,34 @@ void daemon_sample_and_schedule_tick(scheduler_daemon_t *daemon) {
             continue;
         }
 
-        /* New candidate pool detected */
-        if (desired_pool != t->candidate_pool) {
-            t->candidate_pool = desired_pool;
-            t->candidate_consecutive_ticks = 1;
-        } else {
-            t->candidate_consecutive_ticks++;
-        }
-
         /* Check cooldown timer (T_cooldown) */
         uint64_t dwell_time_ms = now_ms - t->last_migration_ms;
-        if (dwell_time_ms < (uint64_t)daemon->config.cooldown_ms) {
-            LOG_DEBUG("[COOLDOWN] TID %d migration to %s suppressed (dwell=%lu ms < cooldown=%d ms)",
+        uint64_t effective_cooldown = is_proactive_migration ?
+                                      (uint64_t)daemon->config.min_profitable_dwell_ms :
+                                      (uint64_t)daemon->config.cooldown_ms;
+
+        if (dwell_time_ms < effective_cooldown) {
+            LOG_DEBUG("[COOLDOWN] TID %d migration to %s suppressed (dwell=%lu ms < cooldown=%lu ms)",
                       t->tid, core_type_to_str(desired_pool),
-                      (unsigned long)dwell_time_ms, daemon->config.cooldown_ms);
+                      (unsigned long)dwell_time_ms, (unsigned long)effective_cooldown);
             continue;
         }
 
-        /* Check hysteresis threshold */
-        if (t->candidate_consecutive_ticks < daemon->config.hysteresis_ticks) {
-            LOG_DEBUG("[HYSTERESIS] TID %d candidate %s held (tick %d/%d)",
-                      t->tid, core_type_to_str(desired_pool),
-                      t->candidate_consecutive_ticks, daemon->config.hysteresis_ticks);
-            continue;
+        /* For reactive fallback, require hysteresis tick confirmation */
+        if (!is_proactive_migration) {
+            if (desired_pool != t->candidate_pool) {
+                t->candidate_pool = desired_pool;
+                t->candidate_consecutive_ticks = 1;
+            } else {
+                t->candidate_consecutive_ticks++;
+            }
+
+            if (t->candidate_consecutive_ticks < daemon->config.hysteresis_ticks) {
+                LOG_DEBUG("[HYSTERESIS] TID %d candidate %s held (tick %d/%d)",
+                          t->tid, core_type_to_str(desired_pool),
+                          t->candidate_consecutive_ticks, daemon->config.hysteresis_ticks);
+                continue;
+            }
         }
 
         /* ============= EXECUTE MIGRATION ============= */
@@ -284,7 +327,7 @@ void daemon_sample_and_schedule_tick(scheduler_daemon_t *daemon) {
                 ev->to_type = desired_pool;
                 ev->ipc = metrics.ipc;
                 ev->mpki = metrics.mpki;
-                strncpy(ev->reason, decision_reason, sizeof(ev->reason));
+                snprintf(ev->reason, sizeof(ev->reason), "%s", decision_reason);
             }
         } else {
             LOG_WARN("sched_setaffinity failed for TID %d (errno=%d: %s)",
@@ -300,7 +343,16 @@ void daemon_run_loop(scheduler_daemon_t *daemon) {
 
     useconds_t sleep_us = daemon->config.sampling_interval_ms * 1000;
     while (daemon->running) {
+        uint64_t t_start = get_time_ns();
         daemon_sample_and_schedule_tick(daemon);
+        uint64_t t_end = get_time_ns();
+        uint64_t dt_ns = (t_end >= t_start) ? (t_end - t_start) : 0;
+
+        daemon->total_ticks++;
+        daemon->total_tick_time_ns += dt_ns;
+        if (dt_ns > daemon->max_tick_time_ns) daemon->max_tick_time_ns = dt_ns;
+        if (dt_ns < daemon->min_tick_time_ns) daemon->min_tick_time_ns = dt_ns;
+
         usleep(sleep_us);
     }
 }
@@ -321,6 +373,24 @@ void daemon_cleanup(scheduler_daemon_t *daemon) {
         fclose(daemon->telemetry_csv);
         daemon->telemetry_csv = NULL;
     }
+    double avg_us = (daemon->total_ticks > 0) ? ((double)daemon->total_tick_time_ns / (double)daemon->total_ticks / 1000.0) : 0.0;
+    double max_us = (double)daemon->max_tick_time_ns / 1000.0;
+    double min_us = (daemon->min_tick_time_ns != UINT64_MAX) ? ((double)daemon->min_tick_time_ns / 1000.0) : 0.0;
+    LOG_INFO("Daemon profiling: Ticks=%" PRIu64 ", Avg Tick=%.2f us, Max Tick=%.2f us, Min Tick=%.2f us",
+             daemon->total_ticks, avg_us, max_us, min_us);
+
+    if (daemon->config.enable_predictive_scheduler) {
+        uint64_t total_preds = 0, total_recs = 0, total_vetos_cost = 0, total_vetos_unc = 0;
+        for (int i = 0; i < daemon->num_threads; i++) {
+            total_preds += daemon->threads[i].predictor.total_predictions;
+            total_recs += daemon->threads[i].predictor.migrations_recommended;
+            total_vetos_cost += daemon->threads[i].predictor.migrations_suppressed_cost;
+            total_vetos_unc += daemon->threads[i].predictor.migrations_suppressed_uncertainty;
+        }
+        printf(COLOR_GREEN "[PREDICTOR TELEMETRY] Total Predictions=%" PRIu64 ", Proactive Approved=%" PRIu64 ", Vetoes (Cost)=%" PRIu64 ", Vetoes (Uncertainty)=%" PRIu64 "\n" COLOR_RESET,
+               total_preds, total_recs, total_vetos_cost, total_vetos_unc);
+    }
+
     LOG_INFO("Hybrid Scheduler Daemon shut down cleanly (Total Migrations: %d).",
              daemon->total_migrations_logged);
 }

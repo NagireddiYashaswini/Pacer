@@ -1,0 +1,4 @@
+scenario,policy,policy_type,time_sec,time_std,speedup_vs_cfs,energy_j,edp,edp_std,reduc_vs_cfs_pct,gain_vs_reactive_pct,avg_migrations
+LLC/DRAM Contention (Aggressor Co-located),Default Linux (CFS),cfs,3.0693964199999755,0.004172029806105636,1.0,,,,,,0.0
+LLC/DRAM Contention (Aggressor Co-located),Reactive hybridsched,reactive,3.0698390743330797,0.005016955227018695,0.9998558053623054,,,,,,7.0
+LLC/DRAM Contention (Aggressor Co-located),Predictive hybridsched,predictive,3.0809857703334274,0.032230366113539244,0.9962384278288317,,,,,,10.333333333333334

@@ -23,6 +23,9 @@ static void print_usage(const char *prog) {
     printf("  --interval <ms>       PMU sampling interval in milliseconds (default: 250)\n");
     printf("  --cooldown <ms>       Anti-thrashing cooldown timer in ms (default: 1500)\n");
     printf("  --hysteresis <ticks>  Hysteresis confirmation ticks (default: 2)\n");
+    printf("  --predictive          Enable online phase-transition predictor (Stage 3)\n");
+    printf("  --reactive            Disable predictor, force reactive scheduling mode\n");
+    printf("  --mig-cost <ms>       Migration cost threshold penalty in ms (default: 15.0)\n");
     printf("  --p-cores <list>      P-core CPU list override (e.g. 0-7)\n");
     printf("  --e-cores <list>      E-core CPU list override (e.g. 8-17)\n");
     printf("  --help                Display this help\n");
@@ -34,6 +37,8 @@ int main(int argc, char **argv) {
     int interval_override = -1;
     int cooldown_override = -1;
     int hysteresis_override = -1;
+    int predictive_mode = -1; /* -1: default from conf, 1: force predictive, 0: force reactive */
+    double mig_cost_override = -1.0;
     const char *p_cores_arg = NULL;
     const char *e_cores_arg = NULL;
 
@@ -48,6 +53,12 @@ int main(int argc, char **argv) {
             cooldown_override = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--hysteresis") == 0 && i + 1 < argc) {
             hysteresis_override = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--predictive") == 0) {
+            predictive_mode = 1;
+        } else if (strcmp(argv[i], "--reactive") == 0) {
+            predictive_mode = 0;
+        } else if (strcmp(argv[i], "--mig-cost") == 0 && i + 1 < argc) {
+            mig_cost_override = atof(argv[++i]);
         } else if (strcmp(argv[i], "--p-cores") == 0 && i + 1 < argc) {
             p_cores_arg = argv[++i];
         } else if (strcmp(argv[i], "--e-cores") == 0 && i + 1 < argc) {
@@ -78,6 +89,8 @@ int main(int argc, char **argv) {
     if (interval_override > 0) g_daemon.config.sampling_interval_ms = interval_override;
     if (cooldown_override > 0) g_daemon.config.cooldown_ms = cooldown_override;
     if (hysteresis_override > 0) g_daemon.config.hysteresis_ticks = hysteresis_override;
+    if (predictive_mode != -1) g_daemon.config.enable_predictive_scheduler = (predictive_mode == 1);
+    if (mig_cost_override > 0.0) g_daemon.config.migration_cost_ms = mig_cost_override;
     if (p_cores_arg || e_cores_arg) {
         topology_set_manual_masks(&g_daemon.topo, p_cores_arg, e_cores_arg);
     }

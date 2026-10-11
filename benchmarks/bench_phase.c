@@ -173,7 +173,10 @@ static void *phase_worker(void *arg) {
                 memory_steps += 8;
             }
 
-            if (now - last_shm_update >= 0.2) {
+            double update_interval = (w->phase_duration_sec < 0.2) ? (w->phase_duration_sec / 2.0) : 0.05;
+            if (update_interval < 0.005) update_interval = 0.005;
+
+            if (now - last_shm_update >= update_interval) {
                 uint64_t inst = (uint64_t)((compute_iters * 500000) + (memory_steps * 2));
                 uint64_t cyc = (current_phase == PHASE_COMPUTE) ? (uint64_t)(inst / 2.6) : (uint64_t)(inst / 0.35);
                 update_shm_telemetry(pid, w->tid, current_phase, inst, cyc);

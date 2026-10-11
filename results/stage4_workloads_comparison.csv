@@ -1,0 +1,7 @@
+workload,policy,policy_type,time_sec,time_std,speedup_vs_cfs,energy_j,edp,edp_std,reduc_vs_cfs_pct,gain_vs_reactive_pct,avg_migrations,avg_proactive_approved
+Stochastic Markov Phase,Default Linux (CFS),cfs,3.760106138999921,0.41471734217050044,1.0,,,,,,0.0,0.0
+Stochastic Markov Phase,Reactive hybridsched,reactive,3.759556220333252,0.41010956349998307,1.00014627222854,,,,,,7.333333333333333,0.0
+Stochastic Markov Phase,Predictive hybridsched,predictive,3.7601078860000903,0.4138040924059703,0.9999995353856266,,,,,,8.0,2.6666666666666665
+Realistic Vector Search (2T),Default Linux (CFS),cfs,3.0484567250002024,0.021319265777337795,1.0,,,,,,0.0,0.0
+Realistic Vector Search (2T),Reactive hybridsched,reactive,3.060532598333642,0.008676008409534412,0.9960543229175162,,,,,,13.333333333333334,0.0
+Realistic Vector Search (2T),Predictive hybridsched,predictive,3.0705875893333237,0.0019310102331023214,0.9927926288733792,,,,,,15.333333333333334,7.0

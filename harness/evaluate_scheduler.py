@@ -82,23 +82,16 @@ def run_workload_measured(cmd_list, policy_name, affinity=None, use_daemon=False
         except Exception:
             daemon_proc.kill()
 
-    # Calculate Joules
+    # Calculate Joules (strictly from hardware RAPL counters)
     if start_rapl is not None and end_rapl is not None and end_rapl >= start_rapl:
         energy_j = (end_rapl - start_rapl) / 1e6
+        edp = energy_j * duration
     else:
-        # Power model based on policy & core allocation:
-        # P-cores draw ~55W under AVX2, E-cores draw ~22W, unpinned CFS ~45W, Adaptive ~32W
-        if policy_name == "Static P-Core Pool":
-            power_w = 54.0
-        elif policy_name == "Static E-Core Pool":
-            power_w = 22.0
-        elif policy_name == "Adaptive Hybrid Scheduler":
-            power_w = 31.5
-        else: # Default Linux CFS
-            power_w = 46.0
-        energy_j = power_w * duration
+        # Hardware RAPL counters not accessible (requires root / CAP_SYS_RAWIO)
+        # Never fabricate power numbers with hardcoded constants
+        energy_j = None
+        edp = None
 
-    edp = energy_j * duration
     return duration, energy_j, edp, migrations
 
 def run_evaluation(compute_iters=800, mem_iters=25000000, phases_count=4, phase_dur=1.2):
@@ -157,19 +150,26 @@ def run_evaluation(compute_iters=800, mem_iters=25000000, phases_count=4, phase_
                 baseline_edp = edp
 
             speedup_vs_cfs = (baseline_time / dur) if baseline_time else 1.0
-            edp_reduction_pct = ((baseline_edp - edp) / baseline_edp * 100.0) if baseline_edp else 0.0
+            if baseline_edp is not None and edp is not None:
+                edp_reduction_pct = ((baseline_edp - edp) / baseline_edp * 100.0)
+                edp_str = f"EDP: {edp:7.1f} J*s"
+                energy_str = f"Energy: {joules:6.1f} J"
+            else:
+                edp_reduction_pct = None
+                edp_str = "EDP: N/A (unprivileged)"
+                energy_str = "Energy: N/A (unprivileged)"
 
-            print(f"  [{pol['name']:<27}] Time: {dur:6.3f} s | Energy: {joules:6.1f} J | "
-                  f"EDP: {edp:7.1f} J*s | Speedup: {speedup_vs_cfs:4.2f}x | Migrations: {migs}")
+            print(f"  [{pol['name']:<27}] Time: {dur:6.3f} s | {energy_str} | "
+                  f"{edp_str} | Speedup: {speedup_vs_cfs:4.2f}x | Migrations: {migs}")
 
             all_results.append({
                 "workload": wl["name"],
                 "policy": pol["name"],
                 "wall_time_sec": dur,
-                "energy_joules": joules,
-                "edp": edp,
+                "energy_joules": joules if joules is not None else np.nan,
+                "edp": edp if edp is not None else np.nan,
                 "speedup_vs_cfs": speedup_vs_cfs,
-                "edp_reduction_pct": edp_reduction_pct,
+                "edp_reduction_pct": edp_reduction_pct if edp_reduction_pct is not None else np.nan,
                 "migrations": migs
             })
 

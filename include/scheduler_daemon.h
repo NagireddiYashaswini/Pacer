@@ -6,6 +6,7 @@
 #include "pmu_sampler.h"
 #include "rapl_energy.h"
 #include "phase_detector.h"
+#include "phase_predictor.h"
 
 #define MAX_LOGGED_MIGRATIONS 2048
 
@@ -18,7 +19,7 @@ typedef struct {
     core_type_t to_type;
     double ipc;
     double mpki;
-    char reason[64];
+    char reason[128];
 } migration_event_t;
 
 typedef struct {
@@ -26,6 +27,7 @@ typedef struct {
     pid_t tid;
     thread_pmu_ctx_t pmu_ctx;
     phase_detector_t phase_det;
+    phase_predictor_t predictor;
 
     core_type_t current_pool;     /* Pool thread is currently pinned to */
     core_type_t candidate_pool;   /* Desired pool from telemetry evaluation */
@@ -51,6 +53,11 @@ typedef struct {
     double p_core_power_multiplier;
     char p_cores_str[128];
     char e_cores_str[128];
+
+    /* Stage 3: Online Phase Prediction & Migration Cost */
+    bool enable_predictive_scheduler;
+    double migration_cost_ms;
+    double min_profitable_dwell_ms;
 } daemon_config_t;
 
 typedef struct {
@@ -70,6 +77,12 @@ typedef struct {
     volatile bool running;
     FILE *log_file;
     FILE *telemetry_csv;
+
+    /* Profiling & overhead metrics */
+    uint64_t total_ticks;
+    uint64_t total_tick_time_ns;
+    uint64_t max_tick_time_ns;
+    uint64_t min_tick_time_ns;
 } scheduler_daemon_t;
 
 int daemon_init(scheduler_daemon_t *daemon, const char *config_file);
