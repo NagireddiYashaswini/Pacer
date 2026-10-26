@@ -20,9 +20,9 @@ echo -e "${CYAN}================================================================
 make all > /dev/null
 
 echo -e "\n${BLUE}[1/3] Launching Adaptive Scheduler Daemon in background...${NC}"
-./bin/hybridsched_daemon --interval 150 --cooldown 350 --hysteresis 1 > results/demo_daemon.log 2>&1 &
+./bin/hybridsched_daemon --interval 150 --cooldown 400 --hysteresis 1 > results/demo_daemon.log 2>&1 &
 DAEMON_PID=$!
-echo -e "      Daemon PID: ${GREEN}$DAEMON_PID${NC} (Sampling tick: 150ms, Cooldown: 350ms)"
+echo -e "      Daemon PID: ${GREEN}$DAEMON_PID${NC} (Sampling tick: 150ms, Cooldown: 400ms)"
 
 # Give daemon time to initialize
 sleep 0.5

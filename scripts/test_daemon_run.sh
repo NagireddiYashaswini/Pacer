@@ -7,7 +7,7 @@ echo "=== Starting Hybrid Scheduler Daemon ==="
 DAEMON_PID=$!
 echo "Daemon PID: $DAEMON_PID"
 
-sleep 0.5
+sleep 1.5
 echo "=== Starting Bench Phase (4 phases x 1.0s) ==="
 ./bin/bench_phase --phases 4 --phase-duration 1.0
 

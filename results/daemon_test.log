@@ -1,11 +1,11 @@
 =======================================================================
   Measured-Speedup-Aware Hybrid CPU Scheduling Daemon (hybridsched)    
 =======================================================================
-[1;32m[INFO] [2036.636 s] [0mNative hybrid PMU sysfs not found (homogeneous or virtual CPU detected).
-[1;32m[INFO] [2036.636 s] [0mLoaded P/E core configuration from config/daemon.conf
-[1;32m[INFO] [2036.636 s] [0mIntel RAPL package sysfs (/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj) not accessible (errno=13: Permission denied). Activating energy model fallback.
-[1;32m[INFO] [2036.636 s] [0mHybrid Scheduler Daemon initialized successfully.
-[1;32m[INFO] [2036.636 s] [0mConfig: SampleInterval=250 ms, Cooldown=1500 ms, Hysteresis=2 ticks, MPKI_Threshold=15.0
+[1;32m[INFO] [1113555.579 s] [0mNative hybrid PMU sysfs not found (homogeneous or virtual CPU detected).
+[1;32m[INFO] [1113555.579 s] [0mLoaded P/E core configuration from config/daemon.conf
+[1;32m[INFO] [1113555.579 s] [0mIntel RAPL package sysfs (/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj) not accessible (errno=13: Permission denied). Activating energy model fallback.
+[1;32m[INFO] [1113555.579 s] [0mHybrid Scheduler Daemon initialized successfully.
+[1;32m[INFO] [1113555.579 s] [0mConfig: SampleInterval=250 ms, Cooldown=1500 ms, Hysteresis=2 ticks, MPKI_Threshold=15.0, Predictive=ENABLED (Cost=15.0 ms)
 ==================== CPU TOPOLOGY SUMMARY ====================
 Total Online CPUs: 36
 Hybrid Hardware:   NO (Emulated/Partitioned)
@@ -13,14 +13,17 @@ P-Core Pool (8):  0-7
 E-Core Pool (10):  8-17
 Sample Freq:       CPU 0: 4600000 kHz | CPU 8: 4600000 kHz
 ==============================================================
-[1;32m[INFO] [2036.636 s] [0mNo specific target PID specified (--pid). Daemon will scan and monitor workloads.
-[1;32m[INFO] [2036.636 s] [0mAdaptive Scheduling Daemon loop running (tick = 200 ms)...
-[1;32m[INFO] [2037.437 s] [0mAdded target PID 54859 to scheduler monitoring pool.
-[1;32m[INFO] [2037.437 s] [0m[THREAD ATTACH] Monitored PID 54859 -> TID 54859 attached (Initial Core 9: E-Core)
-[1;32m[INFO] [2037.437 s] [0m[THREAD ATTACH] Monitored PID 54859 -> TID 54860 attached (Initial Core 4: P-Core)
-[1;32m[INFO] [2038.240 s] [0m[1;35m[MIGRATION #1] TID 54860 moved: P-Core (CPU 4) -> E-Core | Reason: MEM_STALL_GUARD(MPKI=28.0>15.0) (IPC=0.35, MPKI=28.0)[0m
-[1;32m[INFO] [2039.242 s] [0m[1;35m[MIGRATION #2] TID 54860 moved: E-Core (CPU 14) -> P-Core | Reason: COMPUTE_P_BOOST(IPC=2.60) (IPC=2.60, MPKI=0.2)[0m
-[1;32m[INFO] [2040.245 s] [0m[1;35m[MIGRATION #3] TID 54860 moved: P-Core (CPU 4) -> E-Core | Reason: MEM_STALL_GUARD(MPKI=28.0>15.0) (IPC=0.35, MPKI=28.0)[0m
+[1;32m[INFO] [1113555.580 s] [0mNo specific target PID specified (--pid). Daemon will scan and monitor workloads.
+[1;32m[INFO] [1113555.580 s] [0mAdaptive Scheduling Daemon loop running (tick = 200 ms)...
+[1;32m[INFO] [1113556.180 s] [0mAdded target PID 2206729 to scheduler monitoring pool.
+[1;32m[INFO] [1113556.180 s] [0m[THREAD ATTACH] Monitored PID 2206729 -> TID 2206729 attached (Initial Core 9: E-Core)
+[1;32m[INFO] [1113556.181 s] [0m[THREAD ATTACH] Monitored PID 2206729 -> TID 2206730 attached (Initial Core 7: P-Core)
+[1;32m[INFO] [1113557.183 s] [0m[1;35m[MIGRATION #1] TID 2206730 moved: P-Core (CPU 4) -> E-Core | Reason: MEM_STALL_GUARD(MPKI=28.0>15.0) (IPC=0.35, MPKI=28.0)[0m
+[1;32m[INFO] [1113558.186 s] [0m[1;35m[MIGRATION #2] TID 2206730 moved: E-Core (CPU 10) -> P-Core | Reason: COMPUTE_P_BOOST(IPC=2.60) (IPC=2.60, MPKI=0.2)[0m
+[1;32m[INFO] [1113558.787 s] [0m[1;35m[MIGRATION #3] TID 2206730 moved: P-Core (CPU 4) -> E-Core | Reason: PRED_PROACTIVE(MEMORY, P=0.75, Tau=650ms) (IPC=2.60, MPKI=0.2)[0m
+[1;32m[INFO] [1113559.790 s] [0m[1;35m[MIGRATION #4] TID 2206730 moved: E-Core (CPU 14) -> P-Core | Reason: PRED_PROACTIVE(COMPUTE, P=0.75, Tau=755ms) (IPC=0.35, MPKI=28.0)[0m
 
-[1;32m[INFO] [2041.686 s] [0mReceived shutdown signal. Stopping scheduler daemon...
-[1;32m[INFO] [2041.686 s] [0mHybrid Scheduler Daemon shut down cleanly (Total Migrations: 3).
+[1;32m[INFO] [1113560.632 s] [0mReceived shutdown signal. Stopping scheduler daemon...
+[1;32m[INFO] [1113560.632 s] [0mDaemon profiling: Ticks=26, Avg Tick=347.08 us, Max Tick=562.54 us, Min Tick=88.79 us
+[1;32m[PREDICTOR TELEMETRY] Total Predictions=40, Proactive Approved=2, Vetoes (Cost)=0, Vetoes (Uncertainty)=10
+[0m[1;32m[INFO] [1113560.632 s] [0mHybrid Scheduler Daemon shut down cleanly (Total Migrations: 4).

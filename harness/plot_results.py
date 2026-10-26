@@ -84,6 +84,11 @@ def plot_telemetry_timeline(telem_csv="results/daemon_telemetry.csv", out_png="r
     if worker_df.empty:
         worker_df = df.copy()
 
+    # Guard: telemetry CSV may be header-only if daemon was killed before any sample
+    if worker_df.empty:
+        print("[!] Telemetry log empty. Skipping fig2.")
+        return
+
     # Align timestamps to 0
     t0 = worker_df["timestamp_sec"].iloc[0]
     worker_df["time_rel"] = worker_df["timestamp_sec"] - t0

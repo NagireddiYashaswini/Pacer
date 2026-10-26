@@ -1,5 +1,39 @@
+# ── Compiled binaries ─────────────────────────────────────────────────────────
 bin/*
 !bin/.gitkeep
+
+# ── Build artifacts ────────────────────────────────────────────────────────────
 *.o
+*.a
+*.so
+*.out
+
+# ── Python cache ───────────────────────────────────────────────────────────────
 *.pyc
+*.pyo
 __pycache__/
+*.egg-info/
+.pytest_cache/
+
+# ── OS / Editor noise ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# ── Temporary runtime files ────────────────────────────────────────────────────
+/dev/shm/hybridsched_*
+*.tmp
+*.bak
+
+# ── Results: retain publication figures & evaluation CSVs, exclude raw logs ────
+# Keep:  results/fig*.png, results/evaluation_results.csv, results/baseline_*.csv
+# Exclude: raw daemon logs (regenerated each run)
+results/daemon_test.log
+results/demo_daemon.log
+
+# ── Scripts: auto-generated fix scripts (not source, not committed) ────────────
+scripts/fix_system_blockers.sh
