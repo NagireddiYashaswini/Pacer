@@ -32,16 +32,27 @@ int rapl_init(rapl_meter_t *meter) {
         }
     }
     if (meter->max_range_uj == 0) {
-        meter->max_range_uj = 262143328850ULL; /* Default ~262k Joules */
+        LOG_WARN("Could not read RAPL max_energy_range_uj from %s — wraparound detection may be incorrect.",
+                 RAPL_MAX_RANGE_PATH);
+        /* Leave as 0; wraparound will be detected as negative delta and reported */
     }
 
     meter->pkg_fd = open(RAPL_PKG_PATH, O_RDONLY);
     if (meter->pkg_fd < 0) {
-        LOG_INFO("Intel RAPL package sysfs (%s) not accessible (errno=%d: %s). Activating energy model fallback.",
-                 RAPL_PKG_PATH, errno, strerror(errno));
-        meter->available = false;
-        meter->prev_timestamp_ns = get_time_ns();
-        return 0;
+        /*
+         * Intel RAPL sysfs interface is not accessible.  Energy measurement
+         * cannot proceed — a hardcoded power model would fabricate data.
+         *
+         * Common fixes:
+         *   modprobe intel_rapl_msr   (or intel_rapl_common)
+         *   Run as root or add CAP_SYS_ADMIN
+         *   Check: ls /sys/class/powercap/intel-rapl/
+         */
+        LOG_ERROR("FATAL: Intel RAPL sysfs (%s) not accessible (errno=%d: %s). "
+                  "Real energy measurement is required; estimated wattages are forbidden. "
+                  "Load intel_rapl_msr and ensure read permission.",
+                  RAPL_PKG_PATH, errno, strerror(errno));
+        return -1;
     }
 
     meter->core_fd = open(RAPL_CORE_PATH, O_RDONLY);
@@ -100,14 +111,14 @@ int rapl_sample(rapl_meter_t *meter, rapl_sample_t *sample) {
         sample->avg_pkg_power_watts = sample->delta_pkg_joules / dt_sec;
         sample->avg_core_power_watts = sample->delta_core_joules / dt_sec;
     } else {
-        /* Fallback power model: ~45W baseline package power */
-        meter->prev_timestamp_ns = now_ns;
-        double default_watts = 45.0;
-        sample->avg_pkg_power_watts = default_watts;
-        sample->delta_pkg_joules = default_watts * dt_sec;
-        sample->avg_core_power_watts = default_watts * 0.7;
-        sample->delta_core_joules = sample->avg_core_power_watts * dt_sec;
-        meter->estimated_total_joules += sample->delta_pkg_joules;
+        /*
+         * RAPL was unavailable at init time (rapl_init returned -1).
+         * rapl_sample must never be called when meter->available is false —
+         * the caller should have aborted at init.
+         */
+        LOG_ERROR("FATAL: rapl_sample called but RAPL is unavailable. "
+                  "Cannot fabricate energy estimates. Aborting.");
+        return -1;
     }
 
     return 0;
