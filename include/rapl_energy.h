@@ -43,6 +43,15 @@ void rapl_close(rapl_meter_t *meter);
  */
 int rapl_sample(rapl_meter_t *meter, rapl_sample_t *sample);
 
+/*
+ * Compute microjoule delta between prev_uj and cur_uj, handling counter
+ * wraparound at max_range_uj.
+ * Returns 0 on success (writing *delta_out), -1 if cur_uj < prev_uj and
+ * max_range_uj == 0 (cannot correct wraparound).
+ */
+int rapl_compute_delta_uj(uint64_t prev_uj, uint64_t cur_uj,
+                          uint64_t max_range_uj, uint64_t *delta_out);
+
 double rapl_calculate_edp(double joules, double duration_sec);
 
 #endif /* RAPL_ENERGY_H */

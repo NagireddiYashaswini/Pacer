@@ -7,14 +7,14 @@ SRC_DIR := src
 BENCH_DIR := benchmarks
 
 BENCHMARKS := $(BIN_DIR)/bench_compute $(BIN_DIR)/bench_memory $(BIN_DIR)/bench_phase
-TESTS := $(BIN_DIR)/test_phase1 $(BIN_DIR)/test_phase_detector
+TESTS := $(BIN_DIR)/test_phase1 $(BIN_DIR)/test_phase_detector $(BIN_DIR)/test_rapl_wraparound
 DAEMON := $(BIN_DIR)/hybridsched_daemon
 
 DAEMON_SRCS := $(SRC_DIR)/daemon_main.c $(SRC_DIR)/scheduler_daemon.c \
                $(SRC_DIR)/topology.c $(SRC_DIR)/pmu_sampler.c \
                $(SRC_DIR)/rapl_energy.c $(SRC_DIR)/phase_detector.c
 
-.PHONY: all clean benchmarks tests daemon
+.PHONY: all clean benchmarks tests daemon test
 
 all: $(BIN_DIR) $(BENCHMARKS) $(TESTS) $(DAEMON)
 
@@ -41,6 +41,13 @@ $(BIN_DIR)/test_phase1: $(SRC_DIR)/test_phase1.c $(SRC_DIR)/topology.c $(SRC_DIR
 
 $(BIN_DIR)/test_phase_detector: $(SRC_DIR)/test_phase_detector.c $(SRC_DIR)/phase_detector.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+$(BIN_DIR)/test_rapl_wraparound: $(SRC_DIR)/test_rapl_wraparound.c $(SRC_DIR)/rapl_energy.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+test: all
+	./$(BIN_DIR)/test_phase_detector
+	./$(BIN_DIR)/test_rapl_wraparound
 
 clean:
 	rm -rf $(BIN_DIR)/* /dev/shm/hybridsched_*

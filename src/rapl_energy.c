@@ -248,6 +248,21 @@ void rapl_close(rapl_meter_t *meter) {
     meter->available = false;
 }
 
+int rapl_compute_delta_uj(uint64_t prev_uj, uint64_t cur_uj,
+                          uint64_t max_range_uj, uint64_t *delta_out) {
+    if (!delta_out) return -1;
+    if (cur_uj >= prev_uj) {
+        *delta_out = cur_uj - prev_uj;
+        return 0;
+    }
+    if (max_range_uj == 0 || cur_uj >= max_range_uj || prev_uj > max_range_uj) {
+        *delta_out = 0;
+        return -1;
+    }
+    *delta_out = cur_uj + max_range_uj - prev_uj;
+    return 0;
+}
+
 /* -------------------------------------------------------------------------
  * rapl_sample: read current counter, compute delta with wraparound handling.
  *
@@ -275,30 +290,22 @@ int rapl_sample(rapl_meter_t *meter, rapl_sample_t *sample) {
     uint64_t cur_core = (meter->core_fd >= 0) ? read_uj_from_fd(meter->core_fd) : 0;
 
     /* Package delta with wraparound correction */
-    uint64_t d_pkg_uj;
-    if (cur_pkg >= meter->prev_pkg_uj) {
-        d_pkg_uj = cur_pkg - meter->prev_pkg_uj;
-    } else {
-        /* Counter wrapped */
-        if (meter->max_range_uj > 0) {
-            d_pkg_uj = cur_pkg + meter->max_range_uj - meter->prev_pkg_uj;
-            LOG_DEBUG("RAPL pkg counter wrapped: prev=%" PRIu64 " cur=%" PRIu64
-                      " max=%" PRIu64 " delta=%" PRIu64,
-                      meter->prev_pkg_uj, cur_pkg, meter->max_range_uj, d_pkg_uj);
-        } else {
-            LOG_WARN("RAPL pkg counter wrapped but max_range_uj=0 — "
-                     "cannot correct. Skipping this sample (energy=0).");
-            d_pkg_uj = 0;
-        }
+    uint64_t d_pkg_uj = 0;
+    if (rapl_compute_delta_uj(meter->prev_pkg_uj, cur_pkg,
+                              meter->max_range_uj, &d_pkg_uj) != 0) {
+        LOG_WARN("RAPL pkg counter wrapped (prev=%" PRIu64 " cur=%" PRIu64
+                 ") but max_range_uj=%" PRIu64 " — cannot correct. "
+                 "Skipping this sample (energy=0).",
+                 meter->prev_pkg_uj, cur_pkg, meter->max_range_uj);
+        d_pkg_uj = 0;
     }
 
     /* Core delta */
     uint64_t d_core_uj = 0;
     if (meter->core_fd >= 0) {
-        if (cur_core >= meter->prev_core_uj) {
-            d_core_uj = cur_core - meter->prev_core_uj;
-        } else if (meter->max_range_uj > 0) {
-            d_core_uj = cur_core + meter->max_range_uj - meter->prev_core_uj;
+        if (rapl_compute_delta_uj(meter->prev_core_uj, cur_core,
+                                  meter->max_range_uj, &d_core_uj) != 0) {
+            d_core_uj = 0;
         }
     }
 
