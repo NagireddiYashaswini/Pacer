@@ -9,14 +9,14 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TP_DIR="${REPO_ROOT}/third_party"
 mkdir -p "${TP_DIR}" "${REPO_ROOT}/results"
 
-# Pinned release tags (hashes set to TODO until verified on first download)
+# Pinned release tags and verified hashes
 GAPBS_REPO="https://github.com/sbeamer/gapbs.git"
 GAPBS_TAG="v1.5"
-GAPBS_COMMIT="TODO"
+GAPBS_COMMIT="b5e3e19c2845f22fb338f4a4bc4b1ccee861d026"
 
 REDIS_URL="https://download.redis.io/releases/redis-7.2.5.tar.gz"
 REDIS_VERSION="7.2.5"
-REDIS_SHA256="TODO"
+REDIS_SHA256="5981179706f8391f03be91d951acafaeda91af7fac56beffb2701963103e423d"
 
 echo "[1/2] Fetching GAPBS (${GAPBS_TAG})..."
 if [ ! -d "${TP_DIR}/gapbs" ]; then
@@ -45,7 +45,7 @@ if [ ! -d "${TP_DIR}/redis" ]; then
     tar -xzf "${REDIS_TGZ}" -C "${TP_DIR}"
     mv "${TP_DIR}/redis-${REDIS_VERSION}" "${TP_DIR}/redis"
 fi
-make -C "${TP_DIR}/redis" -j"$(nproc)" redis-server redis-benchmark
+make -C "${TP_DIR}/redis" MALLOC=libc -j"$(nproc)" redis-server redis-benchmark
 
 cat > "${REPO_ROOT}/results/workload_versions.json" <<EOF
 {
