@@ -237,7 +237,8 @@ def run_session(
     variants_all = load_workload_split()
     wl_keys = list(cfg["workloads"])
     if smoke:
-        wl_keys = [wl_keys[0]] if wl_keys else ["bench_compute_tune"]
+        # Use tuning-split bench_compute_tune for fast <2min smoke session
+        wl_keys = ["bench_compute_tune"] if "bench_compute_tune" in variants_all else [wl_keys[0]]
     for wk in wl_keys:
         if wk not in variants_all:
             raise KeyError(f"Unknown workload variant '{wk}' in config/workload_split.yaml")
@@ -299,7 +300,21 @@ def run_session(
             0.5 if smoke else float(cfg.get("cooldown_max_wait_sec", 30.0)),
         )
 
-        pol = get_policy(pol_name, trial_index=trial_idx, **daemon_cfg)
+        pol_kwargs = dict(daemon_cfg)
+        if smoke and pol_name == "oracle-static":
+            smoke_prof = os.path.join(session_dir, "smoke_oracle_profile.json")
+            if not os.path.exists(smoke_prof):
+                with open(smoke_prof, "w") as spf:
+                    json.dump({"best_pool_by_edp": "P-Core", "split": "tuning"}, spf)
+            pol_kwargs["profile_path"] = smoke_prof
+        elif smoke and pol_name == "hass-like":
+            smoke_sig = os.path.join(session_dir, "smoke_hass_sig.json")
+            if not os.path.exists(smoke_sig):
+                with open(smoke_sig, "w") as ssf:
+                    json.dump({"preferred_pool": "P-Core", "split": "tuning"}, ssf)
+            pol_kwargs["signature_path"] = smoke_sig
+
+        pol = get_policy(pol_name, trial_index=trial_idx, **pol_kwargs)
         pol.setup(v_cfg)
         if getattr(pol, "daemon_pid", None):
             os.sched_setaffinity(pol.daemon_pid, control_cpus)

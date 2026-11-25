@@ -175,6 +175,24 @@ def holm_bonferroni(p_values: List[float]) -> List[float]:
     return adjusted
 
 
+def _df_to_latex(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "% empty table\n"
+    cols = list(df.columns)
+    align = "l" * len(cols)
+    lines = [
+        f"\\begin{{tabular}}{{{align}}}",
+        "\\hline",
+        " & ".join(str(c).replace("_", "\\_") for c in cols) + " \\\\",
+        "\\hline",
+    ]
+    for _, row in df.iterrows():
+        cells = [str(row[c]).replace("_", "\\_") for c in cols]
+        lines.append(" & ".join(cells) + " \\\\")
+    lines.extend(["\\hline", "\\end{tabular}", ""])
+    return "\n".join(lines)
+
+
 def analyze(
     raw_glob: str = "results/raw/*/runs.csv",
     metric: str = "edp_raw",
@@ -267,9 +285,9 @@ def analyze(
     summary_df.to_csv(os.path.join(out_dir, "analysis_summary.csv"), index=False)
     pairwise_df.to_csv(os.path.join(out_dir, "analysis_pairwise.csv"), index=False)
     with open(os.path.join(out_dir, "table_summary.tex"), "w") as f:
-        f.write(summary_df.to_latex(index=False))
+        f.write(_df_to_latex(summary_df))
     with open(os.path.join(out_dir, "table_pairwise.tex"), "w") as f:
-        f.write(pairwise_df.to_latex(index=False))
+        f.write(_df_to_latex(pairwise_df))
 
     return summary_df, pairwise_df
 

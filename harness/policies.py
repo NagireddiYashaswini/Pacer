@@ -270,6 +270,11 @@ class OracleStaticPolicy(BasePolicy):
     def setup(self, workload: Optional[dict] = None) -> None:
         self.workload = workload
         if self.profile_data is None:
+            if not self.profile_path:
+                app = (workload or {}).get("workload", "")
+                matches = sorted(glob.glob(os.path.join(PROFILES_DIR, f"oracle_{app}_*.json")))
+                if matches:
+                    self.profile_path = matches[-1]
             if not self.profile_path or not os.path.exists(self.profile_path):
                 raise FileNotFoundError(
                     "oracle-static replay requires an existing profile JSON in results/profiles/. "
