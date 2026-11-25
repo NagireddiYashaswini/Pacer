@@ -29,14 +29,10 @@ typedef struct {
     int inst_fd;          /* Instructions */
     int llc_fd;           /* LLC Cache Misses */
     bool pmu_active;
-    bool fallback_active;
 
     pmu_raw_sample_t prev_sample;
     pmu_metrics_t last_metrics;
 
-    /* Fallback proc stat counters */
-    uint64_t prev_utime_ticks;
-    uint64_t prev_stime_ticks;
     int prev_cpu;
 } thread_pmu_ctx_t;
 
