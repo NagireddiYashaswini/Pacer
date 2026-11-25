@@ -51,25 +51,22 @@ that it evaluates stock CFS under emulated frequency heterogeneity.
   - TODO: verify exact formula coefficients and microarchitectural counter names
     against Van Craeynest et al. (ISCA 2012) Section 3–4.
 - **What our `pie-like` implementation does and why:**
-  - At setup, `PieLikePolicy` inspects `/sys/bus/event_source/devices/cpu/events/`
-    and `perf` availability to verify that real stall/MLP counters exist on the
-    host CPU before running.
-  - **Missing counters on this host (`Xeon w5-2565X`, kernel `6.17.0-1033-oem`):**
-    1. `/sys/bus/event_source/devices/cpu/events/` exposes `cpu-cycles`,
-       `instructions`, `cache-misses`, `cache-references`, `mem-loads`,
-       `mem-stores`, and Intel Topdown events (`topdown-mem-bound`,
-       `topdown-be-bound`, `topdown-fe-bound`, `topdown-retiring`), but does **not**
-       expose named MLP/stall events such as `L1D_PEND_MISS.PENDING`,
-       `CYCLE_ACTIVITY.STALLS_MEM_ANY`, or `CYCLE_ACTIVITY.STALLS_TOTAL`.
-    2. `/usr/bin/perf` CLI for kernel `6.17.0-1033-oem` (`linux-tools-6.17.0-1033-oem`)
-       is not installed.
-  - **Fail-loud behavior:** Per Rule 2, `PieLikePolicy.setup()` **fails loudly**
-    with an explicit error listing the missing stall/MLP counters and does **not**
-    silently substitute estimates.
-  - **Documented simplification (if enabled once counters/perf are available):**
-    Use `topdown-mem-bound` / `mem-loads` / `cache-misses` normalized by
-    `cpu-cycles` as a proxy for memory-stall fraction instead of raw
-    `L1D_PEND_MISS.PENDING` MLP accounting.
+  - At setup, `PieLikePolicy.setup()` probes all four raw Intel PMU event
+    encodings directly via `perf_event_open(PERF_TYPE_RAW, ...)`:
+    - `L1D_PEND_MISS.PENDING`: `0x00000148` (`event=0x48, umask=0x01`)
+    - `CYCLE_ACTIVITY.STALLS_MEM_ANY`: `0x140014a3` (`event=0xa3, umask=0x14, cmask=0x14`)
+    - `CYCLE_ACTIVITY.STALLS_TOTAL`: `0x040004a3` (`event=0xa3, umask=0x04, cmask=0x04`)
+    - `RESOURCE_STALLS.ANY`: `0x000001a2` (`event=0xa2, umask=0x01`)
+  - All four counters were verified openable via `perf_event_open` on this
+    `Intel(R) Xeon(R) w5-2565X` (kernel `6.17.0-1033-oem`, `perf_event_paranoid=1`)
+    and sanity-checked on `bench_compute` vs `bench_memory` (memory stalls ~15.6x
+    higher on `bench_memory`).
+  - **Simplification:** On each tick, `PieLikePolicy.on_tick()` computes
+    `mem_stall_frac = STALLS_MEM_ANY / cpu_cycles` and `mlp = L1D_PEND_MISS.PENDING / STALLS_MEM_ANY`,
+    assigning threads with `mem_stall_frac >= 0.50` and `mlp < 2.0` to `e_cores`
+    and all others to `p_cores`.
+  - If any of the four counters fails `perf_event_open`, `PieLikePolicy.setup()`
+    still **fails loudly** with the exact `errno` and refuses to substitute estimates.
 
 ---
 

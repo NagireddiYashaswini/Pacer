@@ -4,12 +4,14 @@ Short (<5s) smoke test for Prompt 3 (policies, workload split, workload detector
 Executes NO workload data.
 """
 
+import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from policies import POLICY_REGISTRY, get_policy
+from policies import POLICY_REGISTRY, PieLikePolicy, get_policy
 from workloads import detect_all_workloads
 from workloads.base import assert_split_allows, load_workload_split
 
@@ -34,19 +36,35 @@ def main() -> int:
     assert oracle.is_deployable is False
     assert "OFFLINE UPPER BOUND" in oracle.label
 
-    # 2. pie-like must fail loudly when stall/MLP counters are absent
-    pie = get_policy("pie-like")
-    exposed = pie.detect_available_pmu_events()
-    if any(ev not in exposed for ev in pie.REQUIRED_EVENTS):
-        try:
-            pie.setup()
-            raise AssertionError("pie-like should have failed loudly on missing counters")
-        except RuntimeError as exc:
-            print("[OK] pie-like failed loudly as required:")
-            for line in str(exc).splitlines():
-                print(f"     {line}")
+    # 2. pie-like counter probe via perf_event_open
+    probe = PieLikePolicy.probe_openable_events()
+    print("=== PIE-LIKE PERF_EVENT_OPEN PROBE ===")
+    for ev, info in probe.items():
+        print(f"  {ev:<32} encoding={info['encoding']} openable={info['openable']} errno={info['errno']}")
 
-    # 3. Tuning/evaluation split enforcement (Part C)
+    # 3. Verify every policy in POLICY_REGISTRY instantiates and runs setup()/teardown() on a trivial no-op
+    print("\n=== POLICY SETUP/TEARDOWN SMOKE TEST (trivial no-op, <5s) ===")
+    noop_wl = {"workload": "noop", "split": "tuning"}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        oracle_prof = os.path.join(tmpdir, "oracle_noop.json")
+        with open(oracle_prof, "w") as f:
+            json.dump({"best_pool_by_edp": "P-Core", "split": "tuning"}, f)
+        hass_sig = os.path.join(tmpdir, "hass_noop.json")
+        with open(hass_sig, "w") as f:
+            json.dump({"preferred_pool": "P-Core", "split": "tuning"}, f)
+
+        for name in POLICY_REGISTRY:
+            kwargs = {}
+            if name == "oracle-static":
+                kwargs["profile_path"] = oracle_prof
+            elif name == "hass-like":
+                kwargs["signature_path"] = hass_sig
+            pol = get_policy(name, **kwargs)
+            pol.setup(noop_wl)
+            td = pol.teardown()
+            print(f"  + {name:<15} OK (deployable={td['is_deployable']})")
+
+    # 4. Tuning/evaluation split enforcement (Part C)
     variants = load_workload_split()
     assert "gapbs_bfs_tune" in variants and "gapbs_bfs_eval" in variants
     tune_cfg = assert_split_allows("gapbs_bfs_tune", "parameter_selection")
@@ -58,9 +76,9 @@ def main() -> int:
             raise AssertionError(f"Expected refusal for {eval_var}")
         except ValueError:
             pass
-    print("[OK] Tuning/evaluation split refuses parameter selection on evaluation variants.")
+    print("\n[OK] Tuning/evaluation split refuses parameter selection on evaluation variants.")
 
-    # 4. Workload detector (no execution)
+    # 5. Workload detector (no execution)
     available, skipped = detect_all_workloads()
     print("\n=== WORKLOAD DETECTOR REPORT ===")
     print("AVAILABLE:")

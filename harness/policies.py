@@ -293,38 +293,135 @@ class PieLikePolicy(BasePolicy):
     label = "reimplementation inspired by Van Craeynest et al., ISCA 2012"
     is_deployable = True
 
-    REQUIRED_EVENTS = (
-        "L1D_PEND_MISS.PENDING",
-        "CYCLE_ACTIVITY.STALLS_MEM_ANY",
-        "CYCLE_ACTIVITY.STALLS_TOTAL",
-        "RESOURCE_STALLS.ANY",
-    )
+    # Intel Sapphire Rapids raw PMU event encodings (PERF_TYPE_RAW = 4):
+    # config = event | (umask << 8) | (cmask << 24)
+    RAW_EVENTS = {
+        "L1D_PEND_MISS.PENDING":        0x00000148,
+        "CYCLE_ACTIVITY.STALLS_MEM_ANY": 0x140014a3,
+        "CYCLE_ACTIVITY.STALLS_TOTAL":   0x040004a3,
+        "RESOURCE_STALLS.ANY":           0x000001a2,
+    }
+    PERF_TYPE_HARDWARE = 0
+    PERF_TYPE_RAW = 4
+    PERF_COUNT_HW_CPU_CYCLES = 0
+    __NR_perf_event_open = 298  # x86_64
 
-    @staticmethod
-    def detect_available_pmu_events() -> List[str]:
-        events_dir = "/sys/bus/event_source/devices/cpu/events"
-        if not os.path.isdir(events_dir):
-            return []
-        return sorted(os.listdir(events_dir))
+    @classmethod
+    def _perf_event_open_ctypes(cls, ev_type: int, config: int, pid: int = 0) -> int:
+        import ctypes
+        import ctypes.util
+
+        class perf_event_attr(ctypes.Structure):
+            _fields_ = [
+                ("type", ctypes.c_uint32),
+                ("size", ctypes.c_uint32),
+                ("config", ctypes.c_uint64),
+                ("sample_period", ctypes.c_uint64),
+                ("sample_type", ctypes.c_uint64),
+                ("read_format", ctypes.c_uint64),
+                ("flags", ctypes.c_uint64),
+                ("wakeup_events", ctypes.c_uint32),
+                ("bp_type", ctypes.c_uint32),
+                ("bp_addr", ctypes.c_uint64),
+                ("bp_len", ctypes.c_uint64),
+                ("branch_sample_type", ctypes.c_uint64),
+                ("sample_regs_user", ctypes.c_uint64),
+                ("sample_stack_user", ctypes.c_uint32),
+                ("clockid", ctypes.c_int32),
+                ("sample_regs_intr", ctypes.c_uint64),
+                ("aux_watermark", ctypes.c_uint32),
+                ("sample_max_stack", ctypes.c_uint16),
+                ("__reserved_2", ctypes.c_uint16),
+            ]
+
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        pe = perf_event_attr()
+        pe.type = ev_type
+        pe.size = ctypes.sizeof(perf_event_attr)
+        pe.config = config
+        # exclude_kernel (bit 5) | exclude_hv (bit 6)
+        pe.flags = (1 << 5) | (1 << 6)
+        fd = libc.syscall(cls.__NR_perf_event_open, ctypes.byref(pe), pid, -1, -1, 0)
+        if fd < 0:
+            err = ctypes.get_errno()
+            raise OSError(err, os.strerror(err))
+        return int(fd)
+
+    @classmethod
+    def probe_openable_events(cls) -> Dict[str, dict]:
+        results = {}
+        for ev_name, cfg in cls.RAW_EVENTS.items():
+            try:
+                fd = cls._perf_event_open_ctypes(cls.PERF_TYPE_RAW, cfg, pid=0)
+                os.close(fd)
+                results[ev_name] = {"openable": True, "encoding": f"0x{cfg:08x}", "errno": 0}
+            except OSError as exc:
+                results[ev_name] = {"openable": False, "encoding": f"0x{cfg:08x}", "errno": exc.errno, "error": exc.strerror}
+        return results
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._tid_fds: Dict[int, Dict[str, int]] = {}
+        self._prev_vals: Dict[int, Dict[str, int]] = {}
 
     def setup(self, workload: Optional[dict] = None) -> None:
         self.workload = workload
-        exposed = self.detect_available_pmu_events()
-        missing = [ev for ev in self.REQUIRED_EVENTS if ev not in exposed]
-        if missing:
+        probe = self.probe_openable_events()
+        failed = {k: v for k, v in probe.items() if not v["openable"]}
+        if failed:
             raise RuntimeError(
-                f"[FATAL] pie-like ({self.label}) cannot run on this CPU: "
-                f"required stall/MLP PMU counters are NOT exposed by perf/sysfs.\n"
-                f"  Missing counters : {missing}\n"
-                f"  Exposed cpu/events: {exposed}\n"
-                f"  Documented simplification (see docs/baselines.md §3): "
-                f"normalize topdown-mem-bound / mem-loads by cpu-cycles once "
-                f"linux-tools-{platform.release()} (perf) is installed. "
-                f"Refusing to silently substitute estimates."
+                f"[FATAL] pie-like ({self.label}) cannot open required PMU counters via perf_event_open: {failed}"
             )
 
     def place(self, pids_or_tids: Iterable[int]) -> None:
-        raise RuntimeError("pie-like cannot place threads because setup() failed.")
+        for pid in pids_or_tids:
+            self.placed_pids.append(pid)
+            _taskset_pid_all_tids(pid, self.p_cores_str)
+            for tid in _discover_tids(pid):
+                if tid in self._tid_fds:
+                    continue
+                fds = {}
+                try:
+                    fds["cycles"] = self._perf_event_open_ctypes(self.PERF_TYPE_HARDWARE, self.PERF_COUNT_HW_CPU_CYCLES, pid=tid)
+                    for ev_name, cfg in self.RAW_EVENTS.items():
+                        fds[ev_name] = self._perf_event_open_ctypes(self.PERF_TYPE_RAW, cfg, pid=tid)
+                    self._tid_fds[tid] = fds
+                    self._prev_vals[tid] = {k: 0 for k in fds}
+                except OSError:
+                    for fd in fds.values():
+                        os.close(fd)
+
+    def on_tick(self) -> None:
+        import struct
+        for tid, fds in list(self._tid_fds.items()):
+            cur = {}
+            try:
+                for k, fd in fds.items():
+                    data = os.read(fd, 8)
+                    cur[k] = struct.unpack("Q", data)[0]
+            except OSError:
+                continue
+            prev = self._prev_vals[tid]
+            d_cyc = cur["cycles"] - prev["cycles"]
+            d_mem = cur["CYCLE_ACTIVITY.STALLS_MEM_ANY"] - prev["CYCLE_ACTIVITY.STALLS_MEM_ANY"]
+            d_l1d = cur["L1D_PEND_MISS.PENDING"] - prev["L1D_PEND_MISS.PENDING"]
+            self._prev_vals[tid] = cur
+            if d_cyc > 0:
+                mem_stall_frac = d_mem / float(d_cyc)
+                mlp = (d_l1d / float(d_mem)) if d_mem > 0 else 1.0
+                target = self.e_cores_str if (mem_stall_frac >= 0.50 and mlp < 2.0) else self.p_cores_str
+                subprocess.run(["taskset", "-pc", target, str(tid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+    def teardown(self) -> Dict[str, object]:
+        for fds in self._tid_fds.values():
+            for fd in fds.values():
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        self._tid_fds.clear()
+        self._prev_vals.clear()
+        return super().teardown()
 
 
 class HassLikePolicy(BasePolicy):
