@@ -5,17 +5,20 @@ Environment & Hardware Verification for Hybrid CPU Scheduling Experiments.
 Checks and records (to stdout and results/env_check.json):
   - CPU model
   - Hybrid PMUs (cpu_core / cpu_atom) vs homogeneous
-  - P/E core lists (from config/daemon.conf or CLI) & physical-core disjointness
+  - P/E core lists & excluded SMT siblings (from config/pools.yaml or CLI)
+  - Physical-core disjointness (no SMT siblings shared across pools)
+  - Excluded siblings idle verification (/proc/stat busy % < 5% during check)
   - cpufreq governor & intel_pstate no_turbo
-  - Per-core scaling_max_freq AND measured frequency under 1 s load
+  - Per-core scaling_max_freq AND measured frequency under 1 s load + P/E ratio
   - RAPL readability (via scanned powercap path)
   - perf_event_paranoid
   - SMT state
 
 On homogeneous hosts, enforces "emulated heterogeneity":
   1. Disjoint physical cores per pool (no SMT siblings shared across pools).
-  2. E-pool clamped via cpufreq scaling_max_freq below P-pool.
-  3. Measured frequency under 1 s load PROVES the clamp took effect.
+  2. Excluded SMT siblings (e.g. 18-25) remain idle.
+  3. E-pool clamped via cpufreq scaling_max_freq below P-pool.
+  4. Measured frequency under 1 s load PROVES the clamp took effect.
 
 Exits non-zero if the environment cannot support a valid experiment.
 Does NOT modify any system settings.
@@ -24,50 +27,18 @@ Does NOT modify any system settings.
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
 from typing import Dict, List, Set, Tuple
 
+from pool_config import DEFAULT_POOLS_PATH, load_pools_config, parse_cpulist
 from rapl_utils import find_rapl_package_domain
 
 
 def read_stripped(path: str) -> str:
     with open(path, "r") as f:
         return f.read().strip()
-
-
-def parse_cpulist(cpulist_str: str) -> List[int]:
-    cpus: List[int] = []
-    for part in cpulist_str.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            a, b = part.split("-", 1)
-            cpus.extend(range(int(a), int(b) + 1))
-        else:
-            cpus.append(int(part))
-    return sorted(set(cpus))
-
-
-def parse_daemon_conf(conf_path: str) -> Tuple[List[int], List[int]]:
-    p_cores: List[int] = []
-    e_cores: List[int] = []
-    if not os.path.exists(conf_path):
-        return p_cores, e_cores
-    with open(conf_path, "r") as f:
-        for line in f:
-            line = line.split("#", 1)[0].strip()
-            if "=" not in line:
-                continue
-            k, v = [x.strip() for x in line.split("=", 1)]
-            if k == "p_cores":
-                p_cores = parse_cpulist(v)
-            elif k == "e_cores":
-                e_cores = parse_cpulist(v)
-    return p_cores, e_cores
 
 
 def get_cpu_topology() -> Dict[int, Dict[str, int]]:
@@ -103,17 +74,35 @@ def get_cpu_model() -> str:
     return "unknown"
 
 
+def read_proc_stat_cpus() -> Dict[int, Tuple[int, int]]:
+    """Return {cpu_id: (busy_ticks, total_ticks)} from /proc/stat."""
+    out: Dict[int, Tuple[int, int]] = {}
+    with open("/proc/stat", "r") as f:
+        for line in f:
+            if not line.startswith("cpu"):
+                continue
+            parts = line.split()
+            label = parts[0]
+            if label == "cpu":
+                continue
+            cpu_id = int(label[3:])
+            vals = [int(x) for x in parts[1:]]
+            # user, nice, system, idle, iowait, irq, softirq, steal
+            idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+            total = sum(vals)
+            busy = total - idle
+            out[cpu_id] = (busy, total)
+    return out
+
+
 def measure_pool_freq_under_load(cpus: List[int], duration_sec: float = 1.0) -> Dict[str, object]:
     """
-    Spawn a pinned busy-loop worker on each CPU in `cpus` for `duration_sec`,
-    sample /sys/devices/system/cpu/cpuN/cpufreq/scaling_cur_freq during the load,
-    and also try `perf stat` (cycles / task-clock) if available for aperf-style
-    effective GHz.
+    Spawn a pinned busy-loop worker on each CPU in `cpus` for `duration_sec`
+    and sample /sys/devices/system/cpu/cpuN/cpufreq/scaling_cur_freq during load.
     """
     if not cpus:
-        return {"per_cpu_khz": {}, "mean_khz": 0.0, "perf_ghz": None}
+        return {"per_cpu_khz": {}, "mean_khz": 0.0}
 
-    # Spawn a lightweight Python busy-loop pinned to all target CPUs (one process per CPU)
     worker_code = "import time; t=time.monotonic()+%f\nwhile time.monotonic()<t: pass" % (duration_sec + 0.3)
     procs = []
     for cpu in cpus:
@@ -124,7 +113,6 @@ def measure_pool_freq_under_load(cpus: List[int], duration_sec: float = 1.0) -> 
         )
         procs.append(p)
 
-    # Let workers ramp up for 0.25s, then sample scaling_cur_freq 4 times over ~0.75s
     time.sleep(0.25)
     samples: Dict[int, List[int]] = {c: [] for c in cpus}
     for _ in range(4):
@@ -156,9 +144,10 @@ def measure_pool_freq_under_load(cpus: List[int], duration_sec: float = 1.0) -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify host environment for Pacer experiments.")
-    parser.add_argument("--config", default="config/daemon.conf", help="Path to daemon.conf")
-    parser.add_argument("--p-cores", default=None, help="Override P-core CPU list (e.g. 0-7)")
-    parser.add_argument("--e-cores", default=None, help="Override E-core CPU list (e.g. 8-17)")
+    parser.add_argument("--pools-config", default=DEFAULT_POOLS_PATH, help="Path to config/pools.yaml")
+    parser.add_argument("--p-cores", default=None, help="Override P-core CPU list")
+    parser.add_argument("--e-cores", default=None, help="Override E-core CPU list")
+    parser.add_argument("--excluded-siblings", default=None, help="Override excluded sibling CPU list")
     parser.add_argument("--out", default="results/env_check.json", help="Output JSON path")
     parser.add_argument("--load-sec", type=float, default=1.0, help="Load duration per pool (s)")
     args = parser.parse_args()
@@ -174,21 +163,26 @@ def main() -> int:
     has_cpu_atom_pmu = os.path.exists("/sys/bus/event_source/devices/cpu_atom/type")
     is_hybrid = has_cpu_core_pmu and has_cpu_atom_pmu
 
-    # 3. P/E core lists
-    conf_p, conf_e = parse_daemon_conf(args.config)
+    # 3. P/E core lists & excluded siblings from config/pools.yaml
+    pools_cfg = load_pools_config(args.pools_config)
     if args.p_cores:
         p_cores = parse_cpulist(args.p_cores)
     elif is_hybrid and os.path.exists("/sys/devices/cpu_core/cpus"):
         p_cores = parse_cpulist(read_stripped("/sys/devices/cpu_core/cpus"))
     else:
-        p_cores = conf_p
+        p_cores = pools_cfg["p_cores"]
 
     if args.e_cores:
         e_cores = parse_cpulist(args.e_cores)
     elif is_hybrid and os.path.exists("/sys/devices/cpu_atom/cpus"):
         e_cores = parse_cpulist(read_stripped("/sys/devices/cpu_atom/cpus"))
     else:
-        e_cores = conf_e
+        e_cores = pools_cfg["e_cores"]
+
+    if args.excluded_siblings is not None:
+        excluded_siblings = parse_cpulist(args.excluded_siblings)
+    else:
+        excluded_siblings = pools_cfg["excluded_siblings"]
 
     if not p_cores or not e_cores:
         errors.append("P-core or E-core pool is empty.")
@@ -205,6 +199,10 @@ def main() -> int:
     overlap_logical = sorted(set(p_cores) & set(e_cores))
     if overlap_logical:
         errors.append(f"Logical CPUs shared between P and E pools: {overlap_logical}")
+
+    overlap_excl = sorted((set(p_cores) | set(e_cores)) & set(excluded_siblings))
+    if overlap_excl:
+        errors.append(f"Excluded siblings overlap with active P/E pools: {overlap_excl}")
 
     p_phys: Set[Tuple[int, int]] = {(topo[c]["physical_id"], topo[c]["core_id"]) for c in p_cores if c in topo}
     e_phys: Set[Tuple[int, int]] = {(topo[c]["physical_id"], topo[c]["core_id"]) for c in e_cores if c in topo}
@@ -263,15 +261,37 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         errors.append(f"Could not read /proc/sys/kernel/perf_event_paranoid: {exc}")
 
-    # 9. Measured frequency under 1s load per pool
+    # 9. Measured frequency under 1s load per pool + excluded siblings idle check
+    stat_before = read_proc_stat_cpus()
     p_load_meas = measure_pool_freq_under_load(p_cores, duration_sec=args.load_sec)
     e_load_meas = measure_pool_freq_under_load(e_cores, duration_sec=args.load_sec)
+    stat_after = read_proc_stat_cpus()
+
+    excl_busy_pct: Dict[str, float] = {}
+    excl_all_idle = True
+    busy_threshold_pct = 5.0
+    for c in excluded_siblings:
+        if c in stat_before and c in stat_after:
+            b0, t0 = stat_before[c]
+            b1, t1 = stat_after[c]
+            dt = t1 - t0
+            db = b1 - b0
+            pct = round((db / dt) * 100.0, 2) if dt > 0 else 0.0
+            excl_busy_pct[str(c)] = pct
+            if pct >= busy_threshold_pct:
+                excl_all_idle = False
+                errors.append(
+                    f"Excluded sibling CPU {c} was NOT idle during check ({pct}% busy >= {busy_threshold_pct}%)."
+                )
 
     # 10. Emulated heterogeneity validation on homogeneous hosts
     p_max_freqs = [scaling_max_freq_khz[str(c)] for c in p_cores if str(c) in scaling_max_freq_khz]
     e_max_freqs = [scaling_max_freq_khz[str(c)] for c in e_cores if str(c) in scaling_max_freq_khz]
 
     clamp_verified = False
+    p_meas_mean = float(p_load_meas["mean_khz"])
+    e_meas_mean = float(e_load_meas["mean_khz"])
+    p_e_ratio = round(p_meas_mean / e_meas_mean, 4) if e_meas_mean > 0 else 0.0
     proposed_clamp_commands: List[str] = []
 
     if not is_hybrid:
@@ -280,10 +300,7 @@ def main() -> int:
         else:
             p_min_max = min(p_max_freqs)
             e_max_max = max(e_max_freqs)
-            p_meas_mean = float(p_load_meas["mean_khz"])
-            e_meas_mean = float(e_load_meas["mean_khz"])
 
-            # Check scaling_max_freq clamp: E pool must be clamped at least 500 MHz below P pool
             if e_max_max > p_min_max - 500_000:
                 errors.append(
                     f"Homogeneous host requires emulated heterogeneity via cpufreq clamp: "
@@ -305,7 +322,6 @@ def main() -> int:
             else:
                 clamp_verified = True
 
-        # Build exact clamp commands (including SMT siblings of E-pool if SMT is active)
         e_with_siblings = set(e_cores)
         for c, info in topo.items():
             if (info["physical_id"], info["core_id"]) in e_phys:
@@ -331,9 +347,16 @@ def main() -> int:
         "physical_cores": len({(v["physical_id"], v["core_id"]) for v in topo.values()}),
         "smt_active": smt_active,
         "pools": {
+            "config_source": os.path.relpath(args.pools_config),
             "p_cores": p_cores,
             "e_cores": e_cores,
-            "disjoint_physical_cores": (len(overlap_logical) == 0 and len(overlap_phys) == 0),
+            "excluded_siblings": excluded_siblings,
+            "disjoint_physical_cores": (len(overlap_logical) == 0 and len(overlap_phys) == 0 and len(overlap_excl) == 0),
+        },
+        "excluded_siblings_idle": {
+            "all_idle": excl_all_idle,
+            "busy_threshold_pct": busy_threshold_pct,
+            "per_cpu_busy_pct": excl_busy_pct,
         },
         "governor": governor,
         "turbo_state": turbo_state,
@@ -342,6 +365,7 @@ def main() -> int:
         "measured_freq_under_load": {
             "p_pool": p_load_meas,
             "e_pool": e_load_meas,
+            "p_e_freq_ratio": p_e_ratio,
             "clamp_verified": clamp_verified if not is_hybrid else None,
         },
         "rapl": {
