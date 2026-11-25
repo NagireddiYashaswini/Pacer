@@ -39,12 +39,14 @@ class MixedTenantWorkload(WorkloadWrapper):
                 os.sched_setaffinity(0, launch_cpus)
 
         io_script = (
-            f"import os, time, tempfile; "
-            f"t0=time.monotonic(); n=0; buf=b'x'*4096; "
-            f"f=tempfile.TemporaryFile(); "
-            f"while time.monotonic()-t0<{dur}: "
-            f"  f.seek(0); f.write(buf); f.flush(); os.fsync(f.fileno()); n+=1\n"
-            f"print(f'IO_OPS={{n}} elapsed={{time.monotonic()-t0:.4f}}')"
+            "import os, time, tempfile\n"
+            "t0 = time.monotonic()\n"
+            "n = 0\n"
+            "buf = b'x' * 4096\n"
+            "f = tempfile.TemporaryFile()\n"
+            f"while time.monotonic() - t0 < {dur}:\n"
+            "    f.seek(0); f.write(buf); f.flush(); os.fsync(f.fileno()); n += 1\n"
+            "print(f'IO_OPS={n} elapsed={time.monotonic()-t0:.4f}')\n"
         )
 
         cmds = {

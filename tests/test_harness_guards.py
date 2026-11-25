@@ -140,6 +140,13 @@ class TestHarnessGuards(unittest.TestCase):
             self.assertIn("launch_cpus", sig.parameters, f"{name}.launch missing launch_cpus")
             self.assertIn("sample_fn", sig.parameters, f"{name}.launch missing sample_fn")
 
+    def test_mixed_tenant_io_script_exits_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = ALL_WORKLOADS["mixed_tenant"]()
+            res = w.launch(tmp, variant_cfg={"variant": "t", "split": "tuning", "duration_sec": 0.2})
+            self.assertEqual(res.exit_status, 0)
+            self.assertIsNotNone(res.extra_metrics.get("io_fsync_ops_sec"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
