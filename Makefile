@@ -59,6 +59,7 @@ test: all
 	./$(BIN_DIR)/test_rapl_wraparound
 	python3 tests/test_stats.py
 	python3 tests/test_harness_guards.py
+	python3 tests/test_plot_results.py
 	python3 harness/smoke_test_prompt3.py
 
 clean:
