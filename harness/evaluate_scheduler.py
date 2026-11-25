@@ -32,7 +32,12 @@ try:
 except ImportError:
     sys.exit("[FATAL] pandas is required: pip install pandas")
 
-RAPL_PATH = "/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj"
+from rapl_utils import find_rapl_package_domain
+
+RAPL_DOMAIN, RAPL_PATH, RAPL_MAX_RANGE_PATH = find_rapl_package_domain()
+if RAPL_PATH is None:
+    RAPL_PATH = "/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj"
+    RAPL_DOMAIN = "unavailable"
 DAEMON_BIN = "./bin/hybridsched_daemon"
 
 
