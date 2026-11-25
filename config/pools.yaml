@@ -7,10 +7,10 @@
 # physical core i has SMT siblings i and i+18).
 # - p_cores: physical cores 0-7 (logical CPUs 0-7)
 # - e_cores: physical cores 8-16 (logical CPUs 8-16, clamped to 2000000 kHz)
-# - control_plane_cpus: physical core 17 (logical CPU 17, clamped to 2000000 kHz)
-#   reserved for harness, daemon, and redis-benchmark client
+# - control_plane_cpus: physical core 17 + SMT sibling (logical CPUs 17,35,
+#   clamped to 2000000 kHz), reserved for harness, daemon, and client
 # - excluded_siblings: P-pool SMT siblings (18-25) that must stay idle
 p_cores: "0-7"
 e_cores: "8-16"
-control_plane_cpus: "17"
+control_plane_cpus: "17,35"
 excluded_siblings: "18-25"

@@ -183,6 +183,7 @@ def main() -> int:
         excluded_siblings = parse_cpulist(args.excluded_siblings)
     else:
         excluded_siblings = pools_cfg["excluded_siblings"]
+    control_plane_cpus = pools_cfg["control_plane_cpus"]
 
     if not p_cores or not e_cores:
         errors.append("P-core or E-core pool is empty.")
@@ -200,9 +201,13 @@ def main() -> int:
     if overlap_logical:
         errors.append(f"Logical CPUs shared between P and E pools: {overlap_logical}")
 
-    overlap_excl = sorted((set(p_cores) | set(e_cores)) & set(excluded_siblings))
+    overlap_excl = sorted((set(p_cores) | set(e_cores) | set(control_plane_cpus)) & set(excluded_siblings))
     if overlap_excl:
-        errors.append(f"Excluded siblings overlap with active P/E pools: {overlap_excl}")
+        errors.append(f"Excluded siblings overlap with active/control-plane CPUs: {overlap_excl}")
+
+    overlap_ctrl = sorted((set(p_cores) | set(e_cores)) & set(control_plane_cpus))
+    if overlap_ctrl:
+        errors.append(f"Control-plane CPUs overlap with P/E workload pools: {overlap_ctrl}")
 
     p_phys: Set[Tuple[int, int]] = {(topo[c]["physical_id"], topo[c]["core_id"]) for c in p_cores if c in topo}
     e_phys: Set[Tuple[int, int]] = {(topo[c]["physical_id"], topo[c]["core_id"]) for c in e_cores if c in topo}
