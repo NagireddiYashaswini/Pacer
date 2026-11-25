@@ -12,6 +12,7 @@ typedef struct {
     double rolling_stddev;
     double current_ipc;
     double current_mpki;
+    uint64_t phase_id;
     bool is_phase_shifting;
     bool is_memory_bound;
     bool is_compute_bound;
@@ -21,6 +22,7 @@ typedef struct {
     int window_size;
     int count;
     int head;
+    uint64_t current_phase_id;
     double samples[MAX_WINDOW_SIZE];
     double mpki_samples[MAX_WINDOW_SIZE];
     double variance_threshold;

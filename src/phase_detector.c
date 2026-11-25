@@ -12,12 +12,14 @@ void phase_detector_init(phase_detector_t *pd, int window_size,
     pd->mean_shift_threshold = (mean_shift_threshold > 0.0) ? mean_shift_threshold : 0.25;
     pd->count = 0;
     pd->head = 0;
+    pd->current_phase_id = 1;
 }
 
 void phase_detector_reset(phase_detector_t *pd) {
     if (!pd) return;
     pd->count = 0;
     pd->head = 0;
+    pd->current_phase_id++;
     memset(&pd->last_stats, 0, sizeof(pd->last_stats));
 }
 
@@ -82,6 +84,10 @@ bool phase_detector_push(phase_detector_t *pd, double ipc, double mpki, phase_st
     }
 
     stats.is_phase_shifting = (variance_spike || mean_shift);
+    if (stats.is_phase_shifting && !pd->last_stats.is_phase_shifting) {
+        pd->current_phase_id++;
+    }
+    stats.phase_id = pd->current_phase_id;
 
     pd->last_stats = stats;
     if (stats_out) {

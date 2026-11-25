@@ -23,6 +23,7 @@ int main(void) {
         if (i >= 2) {
             TEST_ASSERT(shift == false);
         }
+        TEST_ASSERT(stats.phase_id == 1);
         TEST_ASSERT(stats.is_compute_bound == true);
         TEST_ASSERT(stats.is_memory_bound == false);
     }
@@ -37,6 +38,7 @@ int main(void) {
     }
 
     TEST_ASSERT(shift_detected == true);
+    TEST_ASSERT(stats.phase_id > 1);
     TEST_ASSERT(stats.is_memory_bound == true);
     TEST_ASSERT(stats.is_compute_bound == false);
     /* After 5 samples in window of size 5, steady-state variance should settle */
