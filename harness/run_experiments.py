@@ -33,6 +33,7 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from energy_meter import EnergyMeter, RaplEnergyMeter
+from host_guard import enforce_host_guard
 from policies import get_policy
 from pool_config import load_pools_config
 from workloads import ALL_WORKLOADS
@@ -222,6 +223,8 @@ def run_session(
     smoke: bool = False,
     debug_synthetic: bool = False,
 ) -> str:
+    enforce_host_guard()
+
     pools = load_pools_config()
     p_set = set(pools["p_cores"])
     e_set = set(pools["e_cores"])
@@ -242,6 +245,10 @@ def run_session(
 
     # 1. Start-of-session env_check
     env_start = run_env_check(os.path.join(session_dir, "env_start.json"))
+    excl_idle_info = env_start.get("excluded_siblings_idle", {})
+    excl_busy_map = excl_idle_info.get("per_cpu_busy_pct", {})
+    excl_busy_str = ";".join(f"{k}:{excl_busy_map[k]}" for k in sorted(excl_busy_map, key=int))
+    excl_busy_thresh = excl_idle_info.get("busy_threshold_pct", "")
 
     # 2. Energy meter (RAPL only unless --debug-synthetic)
     meter: Optional[RaplEnergyMeter] = None
@@ -297,7 +304,8 @@ def run_session(
     fieldnames = [
         "git_commit", "kernel_version", "cpu_model", "governor", "turbo_state",
         "per_core_freq_khz", "p_cores", "e_cores", "control_plane_cpus",
-        "excluded_siblings", "rapl_source", "rapl_domains_status",
+        "excluded_siblings", "excluded_cpus_busy_pct", "excluded_cpus_busy_threshold_pct",
+        "rapl_source", "rapl_domains_status",
         "trial_index", "timestamp_iso",
         "session_id", "session_type", "synthetic", "warmup",
         "row_valid", "violation_reason", "session_valid", "env_recheck_passed",
@@ -445,6 +453,8 @@ def run_session(
             "e_cores": pools["e_cores_str"],
             "control_plane_cpus": pools["control_plane_cpus_str"],
             "excluded_siblings": pools["excluded_siblings_str"],
+            "excluded_cpus_busy_pct": excl_busy_str,
+            "excluded_cpus_busy_threshold_pct": excl_busy_thresh,
             "rapl_source": rapl_src,
             "rapl_domains_status": rapl_domains_status,
             "trial_index": trial_idx,

@@ -18,6 +18,13 @@ never `18-25` or `26-35`). **It does NOT include Intel Thread Director (ITD)
 hardware feedback.** Any comparison against `default-linux` must explicitly note
 that it evaluates stock CFS under emulated frequency heterogeneity.
 
+**Host Execution Guard (`harness/host_guard.py`):** Both `harness/env_check.py`
+and `harness/run_experiments.py` refuse to run unless:
+1. `PID 1` is the host init (`systemd` or `init` in `/proc/1/comm`).
+2. `Cpus_allowed_list` in `/proc/self/status` is a subset of `control_plane_cpus`
+   from `config/pools.yaml` (launch via `taskset -c 17,35 ...`).
+3. `/proc/1/cgroup` shows the host root cgroup (`/init.scope` or `/`).
+
 ---
 
 ## 2. Policy Registry (`harness/policies.py`)

@@ -6,6 +6,8 @@
 
 A production-grade, user-space adaptive CPU scheduling daemon (`hybridsched`) designed for heterogeneous x86 processors (Performance Cores vs. Efficient Cores). `hybridsched` continuously samples hardware performance counters via `perf_event_open`, identifies dynamic microarchitectural phase shifts, mitigates memory-stall penalties, and dynamically adjusts thread affinity masks (`sched_setaffinity`) to maximize throughput and minimize the Energy-Delay Product ($EDP$).
 
+- **Host Execution Requirement**: `harness/env_check.py` and `harness/run_experiments.py` enforce `harness/host_guard.py`, refusing to run unless executed from the host init namespace (`/proc/1/comm` is `systemd`/`init` and `/proc/1/cgroup` is the host root cgroup) and pinned to `control_plane_cpus` from `config/pools.yaml` (e.g., `taskset -c 17,35`).
+
 ---
 
 ## Key Features

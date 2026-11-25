@@ -32,6 +32,7 @@ import sys
 import time
 from typing import Dict, List, Set, Tuple
 
+from host_guard import enforce_host_guard
 from pool_config import DEFAULT_POOLS_PATH, load_pools_config, parse_cpulist
 from rapl_utils import find_rapl_package_domain
 
@@ -143,6 +144,12 @@ def measure_pool_freq_under_load(cpus: List[int], duration_sec: float = 1.0) -> 
 
 
 def main() -> int:
+    try:
+        enforce_host_guard()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     parser = argparse.ArgumentParser(description="Verify host environment for Pacer experiments.")
     parser.add_argument("--pools-config", default=DEFAULT_POOLS_PATH, help="Path to config/pools.yaml")
     parser.add_argument("--p-cores", default=None, help="Override P-core CPU list")
