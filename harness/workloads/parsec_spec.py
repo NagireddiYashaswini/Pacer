@@ -23,6 +23,8 @@ class ParsecWorkload(WorkloadWrapper):
         run_dir: str,
         variant_cfg: Optional[dict] = None,
         place_fn: Optional[Callable[[List[int]], None]] = None,
+        launch_cpus: Optional[set] = None,
+        sample_fn: Optional[Callable[[List[int]], None]] = None,
     ) -> WorkloadRunResult:
         ok, reason = self.check()
         if not ok:
@@ -32,7 +34,10 @@ class ParsecWorkload(WorkloadWrapper):
         pkg = cfg.get("package", "blackscholes")
         inp = cfg.get("input", "simmedium")
         cmd = [os.path.join(parsec_dir, "bin", "parsecmgmt"), "-a", "run", "-p", pkg, "-i", inp]
-        rc, wall, out_p, err_p = self._run_subprocess(cmd, run_dir, f"parsec_{pkg}", place_fn)
+        rc, wall, out_p, err_p = self._run_subprocess(
+            cmd, run_dir, f"parsec_{pkg}", place_fn=place_fn,
+            launch_cpus=launch_cpus, sample_fn=sample_fn,
+        )
         return WorkloadRunResult(
             name=self.name,
             variant=cfg.get("variant", pkg),
@@ -63,6 +68,8 @@ class SpecCpuWorkload(WorkloadWrapper):
         run_dir: str,
         variant_cfg: Optional[dict] = None,
         place_fn: Optional[Callable[[List[int]], None]] = None,
+        launch_cpus: Optional[set] = None,
+        sample_fn: Optional[Callable[[List[int]], None]] = None,
     ) -> WorkloadRunResult:
         ok, reason = self.check()
         if not ok:
@@ -72,7 +79,10 @@ class SpecCpuWorkload(WorkloadWrapper):
         bench = cfg.get("benchmark", "505.mcf_r")
         spec_cfg = cfg.get("config", "default.cfg")
         cmd = [os.path.join(spec_dir, "bin", "runcpu"), "--config", spec_cfg, bench]
-        rc, wall, out_p, err_p = self._run_subprocess(cmd, run_dir, f"spec_{bench}", place_fn)
+        rc, wall, out_p, err_p = self._run_subprocess(
+            cmd, run_dir, f"spec_{bench}", place_fn=place_fn,
+            launch_cpus=launch_cpus, sample_fn=sample_fn,
+        )
         return WorkloadRunResult(
             name=self.name,
             variant=cfg.get("variant", bench),

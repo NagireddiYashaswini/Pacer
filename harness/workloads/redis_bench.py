@@ -36,6 +36,8 @@ class RedisBenchmarkWorkload(WorkloadWrapper):
         variant_cfg: Optional[dict] = None,
         place_fn: Optional[Callable[[List[int]], None]] = None,
         client_cpulist: Optional[str] = None,
+        launch_cpus: Optional[set] = None,
+        sample_fn: Optional[Callable[[List[int]], None]] = None,
     ) -> WorkloadRunResult:
         ok, reason = self.check()
         if not ok:
@@ -56,8 +58,15 @@ class RedisBenchmarkWorkload(WorkloadWrapper):
         port = int(cfg.get("port", 16379))
         srv_cmd = [srv_bin, "--port", str(port), "--save", "", "--appendonly", "no"]
 
+        def _srv_preexec() -> None:
+            if launch_cpus:
+                os.sched_setaffinity(0, launch_cpus)
+
         with open(srv_out, "w") as so, open(srv_err, "w") as se:
-            srv_proc = subprocess.Popen(srv_cmd, stdout=so, stderr=se, text=True)
+            srv_proc = subprocess.Popen(
+                srv_cmd, stdout=so, stderr=se, text=True,
+                preexec_fn=_srv_preexec if launch_cpus else None,
+            )
             if place_fn is not None:
                 place_fn([srv_proc.pid])
             time.sleep(0.4)
@@ -75,7 +84,12 @@ class RedisBenchmarkWorkload(WorkloadWrapper):
             ]
             t0 = time.perf_counter()
             with open(cli_out, "w") as co, open(cli_err, "w") as ce:
-                cli_proc = subprocess.run(cli_cmd, stdout=co, stderr=ce, text=True, check=False)
+                cli_proc = subprocess.Popen(cli_cmd, stdout=co, stderr=ce, text=True)
+                while cli_proc.poll() is None:
+                    if sample_fn is not None:
+                        sample_fn([srv_proc.pid])
+                    time.sleep(0.25)
+                cli_rc = cli_proc.wait()
             t1 = time.perf_counter()
 
             srv_proc.terminate()
@@ -93,7 +107,7 @@ class RedisBenchmarkWorkload(WorkloadWrapper):
             wall_time_sec=(t1 - t0),
             throughput_metric=avg_rps,
             throughput_unit="requests/sec",
-            exit_status=cli_proc.returncode,
+            exit_status=cli_rc,
             stdout_path=cli_out,
             stderr_path=cli_err,
             extra_metrics={"client_cpulist": client_cpulist},

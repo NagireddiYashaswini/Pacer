@@ -31,6 +31,8 @@ class _GapbsBase(WorkloadWrapper):
         run_dir: str,
         variant_cfg: Optional[dict] = None,
         place_fn: Optional[Callable[[List[int]], None]] = None,
+        launch_cpus: Optional[set] = None,
+        sample_fn: Optional[Callable[[List[int]], None]] = None,
     ) -> WorkloadRunResult:
         ok, reason = self.check()
         if not ok:
@@ -41,7 +43,10 @@ class _GapbsBase(WorkloadWrapper):
         degree = int(cfg.get("graph_degree", 16))
         trials = int(cfg.get("trials", 8))
         cmd = [bin_path, "-g", str(scale), "-k", str(degree), "-n", str(trials)]
-        rc, wall, out_p, err_p = self._run_subprocess(cmd, run_dir, self.name, place_fn)
+        rc, wall, out_p, err_p = self._run_subprocess(
+            cmd, run_dir, self.name, place_fn=place_fn,
+            launch_cpus=launch_cpus, sample_fn=sample_fn,
+        )
         with open(out_p, "r") as f:
             txt = f.read()
         avg_m = re.search(r"Average Time:\s*([0-9.]+)", txt)

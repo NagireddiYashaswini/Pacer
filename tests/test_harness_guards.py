@@ -19,6 +19,7 @@ from energy_meter import compute_rapl_delta_uj
 from host_guard import check_host_guard
 from run_experiments import check_pie_like_validated, create_session_dir
 from validate_pie_counters import check_direction_and_suspects
+from workloads import ALL_WORKLOADS
 from workloads.base import assert_split_allows
 
 
@@ -131,6 +132,13 @@ class TestHarnessGuards(unittest.TestCase):
         self.assertFalse(valid)
         self.assertFalse(rep["L1D_PEND_MISS.PENDING"]["direction_ok"])
         self.assertTrue(any("within 5%" in s for s in suspects))
+
+    def test_all_workloads_launch_signature(self):
+        import inspect
+        for name, cls in ALL_WORKLOADS.items():
+            sig = inspect.signature(cls.launch)
+            self.assertIn("launch_cpus", sig.parameters, f"{name}.launch missing launch_cpus")
+            self.assertIn("sample_fn", sig.parameters, f"{name}.launch missing sample_fn")
 
 
 if __name__ == "__main__":
