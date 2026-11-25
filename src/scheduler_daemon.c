@@ -1,6 +1,152 @@
 #include "scheduler_daemon.h"
 #include <dirent.h>
 #include <signal.h>
+#include <sys/utsname.h>
+
+/* -------------------------------------------------------------------------
+ * Rule 3: collect run-level provenance from /proc, sysfs, and git.
+ * All fields are read from real system state — no hardcoded defaults.
+ * Returns 0 on success; individual fields that cannot be read are set to
+ * "unknown" so the caller knows they are absent, not fabricated.
+ * ------------------------------------------------------------------------- */
+int daemon_collect_provenance(run_provenance_t *prov) {
+    if (!prov) return -1;
+    memset(prov, 0, sizeof(*prov));
+
+    /* git commit: run `git rev-parse --short HEAD` */
+    {
+        FILE *fp = popen("git rev-parse --short HEAD 2>/dev/null", "r");
+        if (fp) {
+            if (!fgets(prov->git_commit, sizeof(prov->git_commit), fp))
+                strncpy(prov->git_commit, "unknown", sizeof(prov->git_commit));
+            else {
+                /* strip trailing newline */
+                size_t l = strlen(prov->git_commit);
+                if (l > 0 && prov->git_commit[l-1] == '\n') prov->git_commit[l-1] = '\0';
+            }
+            pclose(fp);
+        } else {
+            strncpy(prov->git_commit, "unknown", sizeof(prov->git_commit));
+        }
+    }
+
+    /* kernel version: uname */
+    {
+        struct utsname u;
+        if (uname(&u) == 0)
+            strncpy(prov->kernel_version, u.release, sizeof(prov->kernel_version) - 1);
+        else
+            strncpy(prov->kernel_version, "unknown", sizeof(prov->kernel_version));
+    }
+
+    /* CPU model: first "model name" from /proc/cpuinfo */
+    {
+        FILE *f = fopen("/proc/cpuinfo", "r");
+        bool found = false;
+        if (f) {
+            char line[512];
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "model name", 10) == 0) {
+                    char *colon = strchr(line, ':');
+                    if (colon) {
+                        char *v = colon + 1;
+                        while (*v == ' ' || *v == '\t') v++;
+                        strncpy(prov->cpu_model, v, sizeof(prov->cpu_model) - 1);
+                        size_t l = strlen(prov->cpu_model);
+                        if (l > 0 && prov->cpu_model[l-1] == '\n') prov->cpu_model[l-1] = '\0';
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            fclose(f);
+        }
+        if (!found) strncpy(prov->cpu_model, "unknown", sizeof(prov->cpu_model));
+    }
+
+    /* cpufreq governor: read cpu0 (representative) */
+    {
+        FILE *f = fopen("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "r");
+        if (f) {
+            if (!fgets(prov->governor, sizeof(prov->governor), f))
+                strncpy(prov->governor, "unknown", sizeof(prov->governor));
+            else {
+                size_t l = strlen(prov->governor);
+                if (l > 0 && prov->governor[l-1] == '\n') prov->governor[l-1] = '\0';
+            }
+            fclose(f);
+        } else {
+            strncpy(prov->governor, "unknown", sizeof(prov->governor));
+        }
+    }
+
+    /* turbo state: Intel no_turbo sysfs node */
+    {
+        FILE *f = fopen("/sys/devices/system/cpu/intel_pstate/no_turbo", "r");
+        if (f) {
+            char buf[8] = {0};
+            if (fgets(buf, sizeof(buf), f)) {
+                strncpy(prov->turbo_state,
+                        (buf[0] == '0') ? "enabled" : "disabled",
+                        sizeof(prov->turbo_state));
+            } else {
+                strncpy(prov->turbo_state, "unknown", sizeof(prov->turbo_state));
+            }
+            fclose(f);
+        } else {
+            /* Try cpufreq boost (non-pstate kernels) */
+            FILE *f2 = fopen("/sys/devices/system/cpu/cpufreq/boost", "r");
+            if (f2) {
+                char buf[8] = {0};
+                if (fgets(buf, sizeof(buf), f2))
+                    strncpy(prov->turbo_state,
+                            (buf[0] == '1') ? "enabled" : "disabled",
+                            sizeof(prov->turbo_state));
+                else
+                    strncpy(prov->turbo_state, "unknown", sizeof(prov->turbo_state));
+                fclose(f2);
+            } else {
+                strncpy(prov->turbo_state, "unknown", sizeof(prov->turbo_state));
+            }
+        }
+    }
+
+    /* RAPL source label */
+    strncpy(prov->rapl_source, "intel-rapl:0", sizeof(prov->rapl_source));
+
+    /* trial_index: caller sets this before each trial */
+    prov->trial_index = 0;
+
+    return 0;
+}
+
+/*
+ * Build a comma-separated string of per-core current frequencies (kHz).
+ * Reads /sys/devices/system/cpu/cpuN/cpufreq/scaling_cur_freq for each CPU.
+ * Result is written into buf (len bytes).  Cores that cannot be read are
+ * recorded as "?".
+ */
+static void collect_per_core_freqs(char *buf, size_t len) {
+    buf[0] = '\0';
+    size_t off = 0;
+    for (int cpu = 0; cpu < MAX_CPUS && off < len - 1; cpu++) {
+        char path[MAX_PATH_LEN];
+        snprintf(path, sizeof(path),
+                 "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", cpu);
+        FILE *f = fopen(path, "r");
+        if (!f) break;  /* no more CPUs */
+        char freq[32] = "?";
+        if (!fgets(freq, sizeof(freq), f)) strncpy(freq, "?", sizeof(freq));
+        fclose(f);
+        size_t l = strlen(freq);
+        if (l > 0 && freq[l-1] == '\n') freq[l-1] = '\0';
+        int written = snprintf(buf + off, len - off, "%s%s",
+                               (cpu == 0) ? "" : ";", freq);
+        if (written < 0 || (size_t)written >= len - off) break;
+        off += (size_t)written;
+    }
+    if (buf[0] == '\0') strncpy(buf, "unavailable", len);
+}
 
 static void parse_daemon_config(daemon_config_t *cfg, const char *path) {
     /* Set robust defaults */
@@ -44,20 +190,37 @@ int daemon_init(scheduler_daemon_t *daemon, const char *config_file) {
 
     parse_daemon_config(&daemon->config, config_file);
 
+    /* Collect run-level provenance (Rule 3) */
+    if (daemon_collect_provenance(&daemon->provenance) != 0) {
+        LOG_WARN("Could not collect full provenance metadata.");
+    }
+    LOG_INFO("Provenance: git=%s kernel=%s cpu=%s governor=%s turbo=%s",
+             daemon->provenance.git_commit, daemon->provenance.kernel_version,
+             daemon->provenance.cpu_model, daemon->provenance.governor,
+             daemon->provenance.turbo_state);
+
     /* Initialize hardware topology */
     if (topology_init(&daemon->topo, config_file) != 0) {
         LOG_ERROR("Failed to initialize CPU topology");
         return -1;
     }
 
-    /* Initialize Intel RAPL energy meter */
-    rapl_init(&daemon->rapl);
+    /* Initialize Intel RAPL energy meter — required, no fallback */
+    if (rapl_init(&daemon->rapl) != 0) {
+        LOG_ERROR("FATAL: Intel RAPL energy meter initialization failed. "
+                  "Cannot run evaluation without real energy measurements.");
+        return -1;
+    }
 
     /* Open telemetry CSV for plotting */
     daemon->telemetry_csv = fopen("results/daemon_telemetry.csv", "w");
     if (daemon->telemetry_csv) {
+        /* Rule 3: every row must carry provenance metadata */
         fprintf(daemon->telemetry_csv,
-                "timestamp_sec,pid,tid,current_cpu,core_pool,ipc,mpki,delta_cycles,delta_inst,phase_shift,migrations\n");
+                "git_commit,kernel_version,cpu_model,governor,turbo_state,"
+                "per_core_freq_khz,rapl_source,trial_index,timestamp_iso,"
+                "timestamp_sec,pid,tid,current_cpu,core_pool,"
+                "ipc,mpki,delta_cycles,delta_inst,phase_shift,migrations\n");
         fflush(daemon->telemetry_csv);
     }
 
@@ -213,9 +376,32 @@ void daemon_sample_and_schedule_tick(scheduler_daemon_t *daemon) {
                      "EDP_OPTIMAL_E(IPC=%.2f)", metrics.ipc);
         }
 
-        /* Log telemetry for plotting */
+        /* Log telemetry for plotting — Rule 3: include full provenance per row */
         if (daemon->telemetry_csv) {
-            fprintf(daemon->telemetry_csv, "%.3f,%d,%d,%d,%s,%.3f,%.2f,%.0f,%.0f,%d,%d\n",
+            /* per-core frequencies snapshot */
+            char freq_str[2048];
+            collect_per_core_freqs(freq_str, sizeof(freq_str));
+
+            /* ISO-8601 wall-clock timestamp */
+            time_t wall_sec = time(NULL);
+            struct tm *tm_utc = gmtime(&wall_sec);
+            char iso_ts[32];
+            strftime(iso_ts, sizeof(iso_ts), "%Y-%m-%dT%H:%M:%SZ", tm_utc);
+
+            fprintf(daemon->telemetry_csv,
+                    "%s,%s,\"%s\",%s,%s,"
+                    "\"%s\",%s,%d,%s,"
+                    "%.3f,%d,%d,%d,%s,"
+                    "%.3f,%.2f,%.0f,%.0f,%d,%d\n",
+                    daemon->provenance.git_commit,
+                    daemon->provenance.kernel_version,
+                    daemon->provenance.cpu_model,
+                    daemon->provenance.governor,
+                    daemon->provenance.turbo_state,
+                    freq_str,
+                    daemon->provenance.rapl_source,
+                    daemon->provenance.trial_index,
+                    iso_ts,
                     now_sec, t->pid, t->tid, metrics.current_cpu,
                     core_type_to_str(t->current_pool), metrics.ipc, metrics.mpki,
                     metrics.delta_cycles, metrics.delta_instructions,

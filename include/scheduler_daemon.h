@@ -9,6 +9,20 @@
 
 #define MAX_LOGGED_MIGRATIONS 2048
 
+/*
+ * Rule 3: provenance snapshot captured at daemon startup and stamped on
+ * every telemetry CSV row.
+ */
+typedef struct {
+    char git_commit[64];          /* HEAD SHA-1 (short) */
+    char kernel_version[128];     /* uname -r */
+    char cpu_model[256];          /* /proc/cpuinfo model name */
+    char governor[64];            /* cpufreq governor (first CPU) */
+    char turbo_state[16];         /* "enabled" | "disabled" | "unknown" */
+    char rapl_source[64];         /* "intel-rapl:0" or "unavailable" */
+    int  trial_index;             /* set by caller before run */
+} run_provenance_t;
+
 typedef struct {
     pid_t pid;
     pid_t tid;
@@ -57,6 +71,7 @@ typedef struct {
     cpu_topology_t topo;
     rapl_meter_t rapl;
     daemon_config_t config;
+    run_provenance_t provenance;  /* Rule 3: captured at init */
 
     thread_sched_ctx_t threads[MAX_THREADS];
     int num_threads;
@@ -80,5 +95,8 @@ void daemon_sample_and_schedule_tick(scheduler_daemon_t *daemon);
 void daemon_run_loop(scheduler_daemon_t *daemon);
 void daemon_stop(scheduler_daemon_t *daemon);
 void daemon_cleanup(scheduler_daemon_t *daemon);
+
+/* Populate run_provenance_t by reading /proc, sysfs, and git */
+int daemon_collect_provenance(run_provenance_t *prov);
 
 #endif /* SCHEDULER_DAEMON_H */
