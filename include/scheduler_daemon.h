@@ -72,6 +72,7 @@ typedef struct {
     rapl_meter_t rapl;
     daemon_config_t config;
     run_provenance_t provenance;  /* Rule 3: captured at init */
+    pmu_hybrid_info_t hybrid;     /* Detected once at startup */
 
     thread_sched_ctx_t threads[MAX_THREADS];
     int num_threads;

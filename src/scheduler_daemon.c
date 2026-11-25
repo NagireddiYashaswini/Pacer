@@ -199,6 +199,9 @@ int daemon_init(scheduler_daemon_t *daemon, const char *config_file) {
              daemon->provenance.cpu_model, daemon->provenance.governor,
              daemon->provenance.turbo_state);
 
+    /* Detect hybrid vs homogeneous PMU (Step 1) */
+    pmu_detect_hybrid(&daemon->hybrid);
+
     /* Initialize hardware topology */
     if (topology_init(&daemon->topo, config_file) != 0) {
         LOG_ERROR("Failed to initialize CPU topology");
@@ -302,8 +305,15 @@ void daemon_discover_threads(scheduler_daemon_t *daemon) {
                 new_t->total_migrations = 0;
                 new_t->last_migration_ms = (uint64_t)(get_time_ms());
 
-                /* Initialize PMU context */
-                pmu_init_thread_ctx(&new_t->pmu_ctx, pid, tid);
+                /* Initialize PMU context — use hybrid-aware variant */
+                if (pmu_init_thread_ctx_ex(&new_t->pmu_ctx, pid, tid,
+                                           &daemon->hybrid) != 0) {
+                    LOG_ERROR("FATAL: PMU init failed for TID %d. "
+                              "Cannot proceed without real hardware counters.", tid);
+                    /* daemon_init already printed the full diagnostic to stderr */
+                    daemon_cleanup(daemon);
+                    exit(1);
+                }
 
                 /* Initialize Phase Detector */
                 phase_detector_init(&new_t->phase_det,
