@@ -24,6 +24,7 @@ def main() -> int:
         "static-E",
         "oracle-static",
         "pie-like",
+        "pie-like-topdown",
         "hass-like",
         "pacer-mpki",
         "pacer-speedup",

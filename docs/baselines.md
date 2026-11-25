@@ -72,8 +72,15 @@ and `harness/run_experiments.py` refuse to run unless:
     `mem_stall_frac = STALLS_MEM_ANY / cpu_cycles` and `mlp = L1D_PEND_MISS.PENDING / STALLS_MEM_ANY`,
     assigning threads with `mem_stall_frac >= 0.50` and `mlp < 2.0` to `e_cores`
     and all others to `p_cores`.
-  - If any of the four counters fails `perf_event_open`, `PieLikePolicy.setup()`
-    still **fails loudly** with the exact `errno` and refuses to substitute estimates.
+  - If any of the four counters fails `perf_event_open`, is missing from
+    `third_party/perfmon` (or `perf` JSON tables), fails cycle-normalized
+    direction (`frac_memory > frac_compute`), or is flagged as suspect (within 5%
+    of another counter or within 5% of cycles), `pie-like` remains **excluded**.
+  - **TODO (awaiting user approval) — `pie-like-topdown`:** A simplified
+    architectural topdown variant (`PieLikeTopdownPolicy` in `harness/policies.py`)
+    is available using only `/sys/bus/event_source/devices/cpu/events/{slots,
+    topdown-mem-bound, topdown-retiring}` via `PERF_FORMAT_GROUP`. It is **not
+    enabled by default** in `config/experiment.yaml` until approved.
 
 ---
 

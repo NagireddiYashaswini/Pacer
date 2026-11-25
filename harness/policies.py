@@ -448,6 +448,59 @@ class PieLikePolicy(BasePolicy):
         return super().teardown()
 
 
+class PieLikeTopdownPolicy(BasePolicy):
+    name = "pie-like-topdown"
+    label = (
+        "simplified pie-like variant using only architectural topdown events "
+        "(topdown-mem-bound, topdown-retiring, slots) with PERF_FORMAT_GROUP"
+    )
+    is_deployable = True
+    PERF_FORMAT_GROUP = 1 << 3
+
+    @staticmethod
+    def _read_sysfs_topdown_event(name: str) -> int:
+        p = f"/sys/bus/event_source/devices/cpu/events/{name}"
+        with open(p, "r") as f:
+            txt = f.read().strip()
+        # format: event=0x...,umask=0x...
+        ev = 0
+        umask = 0
+        for part in txt.split(","):
+            k, v = part.split("=")
+            if k.strip() == "event":
+                ev = int(v, 0)
+            elif k.strip() == "umask":
+                umask = int(v, 0)
+        return (ev & 0xFF) | ((umask & 0xFF) << 8)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._tid_groups: Dict[int, tuple] = {}
+        self._prev: Dict[int, tuple] = {}
+
+    def setup(self, workload: Optional[dict] = None) -> None:
+        self.workload = workload
+        for ev in ("slots", "topdown-mem-bound", "topdown-retiring"):
+            p = f"/sys/bus/event_source/devices/cpu/events/{ev}"
+            if not os.path.exists(p):
+                raise RuntimeError(f"pie-like-topdown: architectural event '{ev}' not exposed at {p}")
+
+    def place(self, pids_or_tids: Iterable[int]) -> None:
+        for pid in pids_or_tids:
+            self.placed_pids.append(pid)
+            _taskset_pid_all_tids(pid, self.p_cores_str)
+
+    def teardown(self) -> Dict[str, object]:
+        for fds in self._tid_groups.values():
+            for fd in fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        self._tid_groups.clear()
+        return super().teardown()
+
+
 class HassLikePolicy(BasePolicy):
     name = "hass-like"
     label = "reimplementation inspired by Shelepov et al., 2009"
@@ -642,6 +695,7 @@ POLICY_REGISTRY: Dict[str, Type[BasePolicy]] = {
     "static-E": StaticEPolicy,
     "oracle-static": OracleStaticPolicy,
     "pie-like": PieLikePolicy,
+    "pie-like-topdown": PieLikeTopdownPolicy,
     "hass-like": HassLikePolicy,
     "pacer-mpki": PacerMpkiPolicy,
     "pacer-speedup": PacerSpeedupPolicy,
