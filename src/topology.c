@@ -106,7 +106,13 @@ int topology_detect_sysfs_hybrid(cpu_topology_t *topo) {
 
 static void parse_config_line(cpu_topology_t *topo, const char *line) {
     char key[64], val[256];
-    if (sscanf(line, " %63[^= ] = %255s", key, val) == 2) {
+    /* Strip leading whitespace and skip comments */
+    while (*line && isspace((unsigned char)*line)) line++;
+    if (*line == '#' || *line == '\0' || *line == '[') return;
+
+    /* Support both INI ("key = val") and YAML ("key: \"val\"" or "key: val") */
+    if (sscanf(line, " %63[^:= ] %*[:=] \"%255[^\"]\"", key, val) == 2 ||
+        sscanf(line, " %63[^:= ] %*[:=] %255s", key, val) == 2) {
         if (strcmp(key, "p_cores") == 0) {
             parse_cpulist_to_cpuset(val, &topo->p_core_mask);
         } else if (strcmp(key, "e_cores") == 0) {
@@ -173,9 +179,19 @@ int topology_init(cpu_topology_t *topo, const char *config_file) {
         topo->is_hybrid_hardware = false;
         LOG_INFO("Native hybrid PMU sysfs not found (homogeneous or virtual CPU detected).");
 
-        /* Try parsing configuration file */
+        /* Read single-source-of-truth config/pools.yaml first, then optional config_file */
         bool config_loaded = false;
-        if (config_file) {
+        const char *pools_yaml = "config/pools.yaml";
+        FILE *pf = fopen(pools_yaml, "r");
+        if (pf) {
+            char line[MAX_LINE_LEN];
+            while (fgets(line, sizeof(line), pf)) {
+                parse_config_line(topo, line);
+            }
+            fclose(pf);
+            config_loaded = true;
+            LOG_INFO("Loaded P/E core configuration from %s", pools_yaml);
+        } else if (config_file) {
             FILE *f = fopen(config_file, "r");
             if (f) {
                 char line[MAX_LINE_LEN];
@@ -188,20 +204,10 @@ int topology_init(cpu_topology_t *topo, const char *config_file) {
             }
         }
 
-        /* If no valid config masks found, apply balanced partitioning default */
-        if (!config_loaded || (CPU_COUNT(&topo->p_core_mask) == 0 && CPU_COUNT(&topo->e_core_mask) == 0)) {
-            int half = topo->total_cpus / 2;
-            if (half < 1) half = 1;
-            CPU_ZERO(&topo->p_core_mask);
-            CPU_ZERO(&topo->e_core_mask);
-            for (int i = 0; i < half; i++) {
-                CPU_SET(i, &topo->p_core_mask);
-            }
-            for (int i = half; i < topo->total_cpus; i++) {
-                CPU_SET(i, &topo->e_core_mask);
-            }
-            LOG_INFO("Applying default partition: CPUs 0-%d as P-cores, CPUs %d-%d as E-cores",
-                     half - 1, half, topo->total_cpus - 1);
+        if (!config_loaded || CPU_COUNT(&topo->p_core_mask) == 0 || CPU_COUNT(&topo->e_core_mask) == 0) {
+            LOG_ERROR("FATAL: Homogeneous host requires valid p_cores and e_cores in %s (or %s).",
+                      pools_yaml, config_file ? config_file : "(none)");
+            return -1;
         }
     }
 

@@ -33,12 +33,18 @@ except ImportError:
     sys.exit("[FATAL] pandas is required: pip install pandas")
 
 from rapl_utils import find_rapl_package_domain
+from pool_config import load_pools_config
 
 RAPL_DOMAIN, RAPL_PATH, RAPL_MAX_RANGE_PATH = find_rapl_package_domain()
 if RAPL_PATH is None:
     RAPL_PATH = "/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj"
     RAPL_DOMAIN = "unavailable"
 DAEMON_BIN = "./bin/hybridsched_daemon"
+
+_POOLS_CFG = load_pools_config()
+P_CORE_CPULIST = _POOLS_CFG["p_cores_str"]
+E_CORE_CPULIST = _POOLS_CFG["e_cores_str"]
+EXCLUDED_SIBLINGS_CPULIST = _POOLS_CFG["excluded_siblings_str"]
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +135,9 @@ def collect_provenance(trial_index: int) -> dict:
 
     prov["trial_index"] = trial_index
     prov["timestamp_iso"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    prov["p_cores"] = P_CORE_CPULIST
+    prov["e_cores"] = E_CORE_CPULIST
+    prov["excluded_siblings"] = EXCLUDED_SIBLINGS_CPULIST
 
     return prov
 
@@ -176,9 +185,6 @@ def check_rapl_or_abort(debug_synthetic: bool):
 # ---------------------------------------------------------------------------
 # Workload runner
 # ---------------------------------------------------------------------------
-
-P_CORE_CPULIST = "0-7"
-E_CORE_CPULIST = "8-17"
 
 
 def run_workload_measured(
@@ -363,6 +369,9 @@ def run_evaluation(
                     "turbo_state":       prov["turbo_state"],
                     "per_core_freq_khz": prov["per_core_freq_khz"],
                     "rapl_source":       prov["rapl_source"],
+                    "p_cores":           prov["p_cores"],
+                    "e_cores":           prov["e_cores"],
+                    "excluded_siblings": prov["excluded_siblings"],
                     "trial_index":       prov["trial_index"],
                     "timestamp_iso":     prov["timestamp_iso"],
                     # measurement

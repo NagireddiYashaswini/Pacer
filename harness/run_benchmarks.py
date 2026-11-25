@@ -11,9 +11,15 @@ import subprocess
 import argparse
 import pandas as pd
 
-P_CORE_CPULIST = "0-7"
-E_CORE_CPULIST = "8-17"
-RAPL_PATH = "/sys/class/powercap/intel-rapl:0/energy_uj"
+from pool_config import load_pools_config
+from rapl_utils import find_rapl_package_domain
+
+_POOLS_CFG = load_pools_config()
+P_CORE_CPULIST = _POOLS_CFG["p_cores_str"]
+E_CORE_CPULIST = _POOLS_CFG["e_cores_str"]
+_, RAPL_PATH, _ = find_rapl_package_domain()
+if RAPL_PATH is None:
+    RAPL_PATH = "/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj"
 
 def read_rapl_uj():
     if os.path.exists(RAPL_PATH) and os.access(RAPL_PATH, os.R_OK):

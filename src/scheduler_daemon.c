@@ -159,8 +159,8 @@ static void parse_daemon_config(daemon_config_t *cfg, const char *path) {
     cfg->hysteresis_ticks = 2;
     cfg->enable_edp_optimization = true;
     cfg->p_core_power_multiplier = 2.5;
-    strncpy(cfg->p_cores_str, "0-7", sizeof(cfg->p_cores_str));
-    strncpy(cfg->e_cores_str, "8-17", sizeof(cfg->e_cores_str));
+    cfg->p_cores_str[0] = '\0';
+    cfg->e_cores_str[0] = '\0';
 
     if (!path) return;
     FILE *f = fopen(path, "r");
@@ -208,6 +208,30 @@ int daemon_init(scheduler_daemon_t *daemon, const char *config_file) {
         return -1;
     }
 
+    /* Populate pool definitions in provenance from topology & config/pools.yaml */
+    cpuset_to_str(&daemon->topo.p_core_mask, daemon->topo.total_cpus,
+                  daemon->provenance.p_cores_pool, sizeof(daemon->provenance.p_cores_pool));
+    cpuset_to_str(&daemon->topo.e_core_mask, daemon->topo.total_cpus,
+                  daemon->provenance.e_cores_pool, sizeof(daemon->provenance.e_cores_pool));
+    snprintf(daemon->provenance.excluded_siblings, sizeof(daemon->provenance.excluded_siblings), "none");
+    {
+        FILE *pf = fopen("config/pools.yaml", "r");
+        if (pf) {
+            char line[MAX_LINE_LEN];
+            while (fgets(line, sizeof(line), pf)) {
+                char key[64], val[128];
+                if (sscanf(line, " %63[^:= ] %*[:=] \"%127[^\"]\"", key, val) == 2 ||
+                    sscanf(line, " %63[^:= ] %*[:=] %127s", key, val) == 2) {
+                    if (strcmp(key, "excluded_siblings") == 0) {
+                        snprintf(daemon->provenance.excluded_siblings,
+                                 sizeof(daemon->provenance.excluded_siblings), "%s", val);
+                    }
+                }
+            }
+            fclose(pf);
+        }
+    }
+
     /* Initialize Intel RAPL energy meter — required, no fallback */
     if (rapl_init(&daemon->rapl) != 0) {
         LOG_ERROR("FATAL: Intel RAPL energy meter initialization failed. "
@@ -221,7 +245,8 @@ int daemon_init(scheduler_daemon_t *daemon, const char *config_file) {
         /* Rule 3: every row must carry provenance metadata */
         fprintf(daemon->telemetry_csv,
                 "git_commit,kernel_version,cpu_model,governor,turbo_state,"
-                "per_core_freq_khz,rapl_source,trial_index,timestamp_iso,"
+                "per_core_freq_khz,rapl_source,p_cores,e_cores,excluded_siblings,"
+                "trial_index,timestamp_iso,"
                 "timestamp_sec,pid,tid,current_cpu,core_pool,"
                 "ipc,mpki,delta_cycles,delta_inst,phase_shift,migrations\n");
         fflush(daemon->telemetry_csv);
@@ -400,7 +425,8 @@ void daemon_sample_and_schedule_tick(scheduler_daemon_t *daemon) {
 
             fprintf(daemon->telemetry_csv,
                     "%s,%s,\"%s\",%s,%s,"
-                    "\"%s\",%s,%d,%s,"
+                    "\"%s\",%s,\"%s\",\"%s\",\"%s\","
+                    "%d,%s,"
                     "%.3f,%d,%d,%d,%s,"
                     "%.3f,%.2f,%.0f,%.0f,%d,%d\n",
                     daemon->provenance.git_commit,
@@ -410,6 +436,9 @@ void daemon_sample_and_schedule_tick(scheduler_daemon_t *daemon) {
                     daemon->provenance.turbo_state,
                     freq_str,
                     daemon->provenance.rapl_source,
+                    daemon->provenance.p_cores_pool,
+                    daemon->provenance.e_cores_pool,
+                    daemon->provenance.excluded_siblings,
                     daemon->provenance.trial_index,
                     iso_ts,
                     now_sec, t->pid, t->tid, metrics.current_cpu,

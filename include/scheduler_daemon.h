@@ -20,6 +20,9 @@ typedef struct {
     char governor[64];            /* cpufreq governor (first CPU) */
     char turbo_state[16];         /* "enabled" | "disabled" | "unknown" */
     char rapl_source[64];         /* "intel-rapl:0" or "unavailable" */
+    char p_cores_pool[128];       /* P-core CPU list */
+    char e_cores_pool[128];       /* E-core CPU list */
+    char excluded_siblings[128];  /* Excluded SMT siblings */
     int  trial_index;             /* set by caller before run */
 } run_provenance_t;
 
