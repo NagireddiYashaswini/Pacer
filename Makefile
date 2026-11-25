@@ -57,6 +57,7 @@ $(BIN_DIR)/diagnose_speedup: $(SRC_DIR)/diagnose_speedup.c $(SRC_DIR)/scheduler_
 test: all
 	./$(BIN_DIR)/test_phase_detector
 	./$(BIN_DIR)/test_rapl_wraparound
+	python3 harness/smoke_test_prompt3.py
 
 clean:
 	rm -rf $(BIN_DIR)/* /dev/shm/hybridsched_*
