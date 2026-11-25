@@ -1,0 +1,103 @@
+# Tuning vs. Evaluation Workload Split (Part C)
+#
+# Parameter selection, oracle-static profiling, and hass-like signature
+# building are PERMITTED ONLY on variants assigned to split: "tuning".
+# The harness refuses to run parameter selection or offline profiling on
+# any variant assigned to split: "evaluation".
+
+workloads:
+  # --- Microbenchmarks ---
+  bench_compute_tune:
+    workload: bench_compute
+    split: tuning
+    args: ["--iterations", "400", "--matrix-size", "96"]
+  bench_compute_eval:
+    workload: bench_compute
+    split: evaluation
+    args: ["--iterations", "800", "--matrix-size", "128"]
+
+  bench_memory_tune:
+    workload: bench_memory
+    split: tuning
+    args: ["--iterations", "10000000", "--buffer-mb", "32"]
+  bench_memory_eval:
+    workload: bench_memory
+    split: evaluation
+    args: ["--iterations", "25000000", "--buffer-mb", "64"]
+
+  bench_dram_chase_tune:
+    workload: bench_dram_chase
+    split: tuning
+    args: ["--buffer-mb", "192", "--duration", "2.0"]
+  bench_dram_chase_eval:
+    workload: bench_dram_chase
+    split: evaluation
+    args: ["--buffer-mb", "256", "--duration", "3.0"]
+
+  bench_phase_tune:
+    workload: bench_phase
+    split: tuning
+    args: ["--phases", "2", "--phase-duration", "1.0"]
+  bench_phase_eval:
+    workload: bench_phase
+    split: evaluation
+    args: ["--phases", "4", "--phase-duration", "1.2"]
+
+  # --- GAP Benchmark Suite (bfs, pr) ---
+  gapbs_bfs_tune:
+    workload: gapbs_bfs
+    split: tuning
+    graph_scale: 18
+    graph_degree: 16
+    seed: 101
+    trials: 8
+  gapbs_bfs_eval:
+    workload: gapbs_bfs
+    split: evaluation
+    graph_scale: 20
+    graph_degree: 16
+    seed: 2026
+    trials: 16
+
+  gapbs_pr_tune:
+    workload: gapbs_pr
+    split: tuning
+    graph_scale: 18
+    graph_degree: 16
+    seed: 101
+    trials: 4
+  gapbs_pr_eval:
+    workload: gapbs_pr
+    split: evaluation
+    graph_scale: 20
+    graph_degree: 16
+    seed: 2026
+    trials: 8
+
+  # --- Redis + redis-benchmark ---
+  redis_tune:
+    workload: redis
+    split: tuning
+    requests: 50000
+    clients: 16
+    data_size: 256
+    keyspace: 10000
+    tests: "get,set"
+  redis_eval:
+    workload: redis
+    split: evaluation
+    requests: 200000
+    clients: 32
+    data_size: 512
+    keyspace: 100000
+    tests: "get,set,lpush,lpop"
+
+  # --- Mixed multi-tenant ---
+  mixed_tenant_tune:
+    workload: mixed_tenant
+    split: tuning
+    duration_sec: 3.0
+  mixed_tenant_eval:
+    workload: mixed_tenant
+    split: evaluation
+    duration_sec: 6.0
