@@ -498,17 +498,28 @@ def run_session(
 
     # In smoke mode, run 1 trial per policy without extra 5s warmups (keeps total < ~50s);
     # in full sessions, run 1 warmup + >=10 randomized trial blocks.
+    total_runs = len(wl_keys) * len(policies_list) * (trials + (0 if smoke else 1))
+    run_idx = 0
+
     if not smoke:
         for wk_key in wl_keys:
             for pol_name in policies_list:
-                rows.append(execute_one(wk_key, pol_name, 0, is_warmup=True))
+                run_idx += 1
+                print(f"[{run_idx}/{total_runs}] WARMUP {wk_key} | {pol_name}", flush=True)
+                r = execute_one(wk_key, pol_name, 0, is_warmup=True)
+                print(f"  -> wall={r['wall_time_sec']}s pkg_J={r['energy_pkg_j']} temp={r['pkg_temp_c']}C", flush=True)
+                rows.append(r)
 
     for t_idx in range(1, trials + 1):
         for wk_key in wl_keys:
             order = list(policies_list)
             rng.shuffle(order)
             for pol_name in order:
-                rows.append(execute_one(wk_key, pol_name, t_idx, is_warmup=False))
+                run_idx += 1
+                print(f"[{run_idx}/{total_runs}] T{t_idx}/{trials} {wk_key} | {pol_name}", flush=True)
+                r = execute_one(wk_key, pol_name, t_idx, is_warmup=False)
+                print(f"  -> wall={r['wall_time_sec']}s pkg_J={r['energy_pkg_j']} temp={r['pkg_temp_c']}C", flush=True)
+                rows.append(r)
 
     # End-of-session idle baseline & env_check drift verification
     idle_power_end = measure_idle_power(meter, idle_win) if meter else float("nan")
