@@ -86,10 +86,15 @@ def main() -> int:
             all_ok = False
 
     record = {
-        "validated": all_ok,
+        "validated": False,
+        "reason": (
+            "INVALID per Part B: no Sapphire Rapids perf JSON event table or Intel perfmon "
+            "file was found on disk (perf CLI for 6.17.0-1033-oem is missing), so the 4 raw "
+            "encodings cannot be verified against an on-disk Sapphire Rapids event table."
+        ),
         "timestamp_iso": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "kernel_version": platform.release(),
-        "encoding_source": "Intel Sapphire Rapids PMU raw event encodings (harness/policies.py:PieLikePolicy.RAW_EVENTS)",
+        "encoding_source": "from memory (UNVERIFIED - no on-disk Sapphire Rapids perf JSON/perfmon table)",
         "test_cpu": test_cpu,
         "openable_probe": probe,
         "sanity_check": sanity,
@@ -99,7 +104,7 @@ def main() -> int:
     with open(out_path, "w") as f:
         json.dump(record, f, indent=2)
     print(json.dumps(record, indent=2))
-    return 0 if all_ok else 1
+    return 1
 
 
 if __name__ == "__main__":
