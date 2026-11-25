@@ -69,11 +69,12 @@ class RaplEnergyMeter(EnergyMeter):
                 self.max_range_uj = int(f.read().strip())
 
         pkg_dir = os.path.dirname(pkg_path)
-        self.core_path = self._find_subdomain_energy(pkg_dir, "core")
-        self.dram_path = self._find_subdomain_energy(pkg_dir, "dram")
+        self.core_path, self.core_status = self._find_subdomain_energy(pkg_dir, "core")
+        self.dram_path, self.dram_status = self._find_subdomain_energy(pkg_dir, "dram")
+        self.pkg_status = f"readable ({self.pkg_path})"
 
     @staticmethod
-    def _find_subdomain_energy(pkg_dir: str, substr: str) -> Optional[str]:
+    def _find_subdomain_energy(pkg_dir: str, substr: str):
         try:
             for entry in sorted(os.listdir(pkg_dir)):
                 if not entry.startswith("intel-rapl:"):
@@ -81,13 +82,16 @@ class RaplEnergyMeter(EnergyMeter):
                 sub_dir = os.path.join(pkg_dir, entry)
                 name_p = os.path.join(sub_dir, "name")
                 en_p = os.path.join(sub_dir, "energy_uj")
-                if os.path.isfile(name_p) and os.access(en_p, os.R_OK):
+                if os.path.isfile(name_p):
                     with open(name_p, "r") as f:
-                        if substr in f.read().strip().lower():
-                            return en_p
-        except OSError:
-            pass
-        return None
+                        nm = f.read().strip().lower()
+                    if substr in nm:
+                        if os.access(en_p, os.R_OK):
+                            return en_p, f"readable ({en_p})"
+                        return None, f"NA (unreadable {en_p})"
+        except OSError as exc:
+            return None, f"NA ({exc})"
+        return None, f"NA (no {substr} domain exposed in {pkg_dir})"
 
     @staticmethod
     def _read_uj(path: str) -> int:

@@ -64,6 +64,8 @@ def load_and_filter_raw(raw_glob: str = "results/raw/*/runs.csv") -> Tuple[pd.Da
         ~_is_true(df["session_valid"])
         if "session_valid" in df.columns else pd.Series(False, index=df.index)
     )
+    if "row_valid" in df.columns:
+        mask_invalid = mask_invalid | (~_is_true(df["row_valid"]))
 
     keep = ~(mask_warmup | mask_smoke | mask_synth | mask_invalid)
     counts = {

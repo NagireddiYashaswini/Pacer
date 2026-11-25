@@ -24,6 +24,8 @@ class _MicrobenchBase(WorkloadWrapper):
         run_dir: str,
         variant_cfg: Optional[dict] = None,
         place_fn: Optional[Callable[[List[int]], None]] = None,
+        launch_cpus: Optional[set] = None,
+        sample_fn: Optional[Callable[[List[int]], None]] = None,
     ) -> WorkloadRunResult:
         ok, reason = self.check()
         if not ok:
@@ -31,7 +33,10 @@ class _MicrobenchBase(WorkloadWrapper):
         cfg = variant_cfg or {}
         args = [str(a) for a in cfg.get("args", [])]
         cmd = [self.bin_path] + args
-        rc, wall, out_p, err_p = self._run_subprocess(cmd, run_dir, self.name, place_fn)
+        rc, wall, out_p, err_p = self._run_subprocess(
+            cmd, run_dir, self.name, place_fn=place_fn,
+            launch_cpus=launch_cpus, sample_fn=sample_fn,
+        )
         with open(out_p, "r") as f:
             txt = f.read()
         tp = self._parse_throughput(txt, wall)

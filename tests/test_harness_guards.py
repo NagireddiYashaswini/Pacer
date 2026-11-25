@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "harness"))
 
 from analyze import analyze, load_and_filter_raw
 from energy_meter import compute_rapl_delta_uj
-from run_experiments import create_session_dir
+from run_experiments import check_pie_like_validated, create_session_dir
 from workloads.base import assert_split_allows
 
 
@@ -84,6 +84,12 @@ class TestHarnessGuards(unittest.TestCase):
 
             summary_df, _ = analyze(os.path.join(tmp, "raw", "*", "runs.csv"), out_dir=out_dir, n_resamples=100)
             self.assertEqual(summary_df.iloc[0]["status"], "INSUFFICIENT")
+
+    def test_pie_gate_refuses_without_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, msg = check_pie_like_validated(os.path.join(tmp, "nonexistent.json"))
+            self.assertFalse(ok)
+            self.assertIn("excluded", msg)
 
 
 if __name__ == "__main__":

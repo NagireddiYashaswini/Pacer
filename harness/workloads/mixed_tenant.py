@@ -24,6 +24,8 @@ class MixedTenantWorkload(WorkloadWrapper):
         run_dir: str,
         variant_cfg: Optional[dict] = None,
         place_fn: Optional[Callable[[List[int]], None]] = None,
+        launch_cpus: Optional[set] = None,
+        sample_fn: Optional[Callable[[List[int]], None]] = None,
     ) -> WorkloadRunResult:
         ok, reason = self.check()
         if not ok:
@@ -31,6 +33,10 @@ class MixedTenantWorkload(WorkloadWrapper):
         cfg = variant_cfg or {}
         dur = float(cfg.get("duration_sec", 3.0))
         os.makedirs(run_dir, exist_ok=True)
+
+        def _preexec() -> None:
+            if launch_cpus:
+                os.sched_setaffinity(0, launch_cpus)
 
         io_script = (
             f"import os, time, tempfile; "
@@ -55,11 +61,20 @@ class MixedTenantWorkload(WorkloadWrapper):
             err_p = os.path.join(run_dir, f"mixed_{role}.stderr.log")
             out_f = open(out_p, "w")
             err_f = open(err_p, "w")
-            p = subprocess.Popen(cmd, stdout=out_f, stderr=err_f, text=True)
+            p = subprocess.Popen(
+                cmd, stdout=out_f, stderr=err_f, text=True,
+                preexec_fn=_preexec if launch_cpus else None,
+            )
             procs[role] = (p, out_f, err_f, out_p, err_p)
 
+        all_pids = [p.pid for p, *_ in procs.values()]
         if place_fn is not None:
-            place_fn([p.pid for p, *_ in procs.values()])
+            place_fn(all_pids)
+
+        while any(p.poll() is None for p, *_ in procs.values()):
+            if sample_fn is not None:
+                sample_fn(all_pids)
+            time.sleep(0.25)
 
         rc_max = 0
         for role, (p, out_f, err_f, _, _) in procs.items():

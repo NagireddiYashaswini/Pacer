@@ -87,15 +87,33 @@ class WorkloadWrapper(abc.ABC):
         run_dir: str,
         tag: str,
         place_fn: Optional[Callable[[List[int]], None]] = None,
+        launch_cpus: Optional[set] = None,
+        sample_fn: Optional[Callable[[List[int]], None]] = None,
+        sample_interval_sec: float = 0.25,
     ) -> Tuple[int, float, str, str]:
         os.makedirs(run_dir, exist_ok=True)
         stdout_path = os.path.join(run_dir, f"{tag}.stdout.log")
         stderr_path = os.path.join(run_dir, f"{tag}.stderr.log")
+
+        def _preexec() -> None:
+            if launch_cpus:
+                os.sched_setaffinity(0, launch_cpus)
+
         with open(stdout_path, "w") as out_f, open(stderr_path, "w") as err_f:
             t0 = time.perf_counter()
-            proc = subprocess.Popen(cmd, stdout=out_f, stderr=err_f, text=True)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=out_f,
+                stderr=err_f,
+                text=True,
+                preexec_fn=_preexec if launch_cpus else None,
+            )
             if place_fn is not None:
                 place_fn([proc.pid])
+            while proc.poll() is None:
+                if sample_fn is not None:
+                    sample_fn([proc.pid])
+                time.sleep(sample_interval_sec)
             rc = proc.wait()
             t1 = time.perf_counter()
         return rc, (t1 - t0), stdout_path, stderr_path

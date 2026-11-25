@@ -114,6 +114,10 @@ class BasePolicy(abc.ABC):
     def place(self, pids_or_tids: Iterable[int]) -> None:
         ...
 
+    def launch_cpus(self) -> set:
+        """Initial CPU set the workload must be launched inside."""
+        return set(self.pools["p_cores"]) | set(self.pools["e_cores"])
+
     def on_tick(self) -> None:
         pass
 
@@ -151,6 +155,9 @@ class StaticPPolicy(BasePolicy):
     label = "Static P-core pool assignment"
     is_deployable = True
 
+    def launch_cpus(self) -> set:
+        return set(self.pools["p_cores"])
+
     def setup(self, workload: Optional[dict] = None) -> None:
         self.workload = workload
 
@@ -164,6 +171,9 @@ class StaticEPolicy(BasePolicy):
     name = "static-E"
     label = "Static E-core pool assignment"
     is_deployable = True
+
+    def launch_cpus(self) -> set:
+        return set(self.pools["e_cores"])
 
     def setup(self, workload: Optional[dict] = None) -> None:
         self.workload = workload
@@ -284,6 +294,11 @@ class OracleStaticPolicy(BasePolicy):
                 self.profile_data = json.load(f)
         self.chosen_pool = self.profile_data["best_pool_by_edp"]
 
+    def launch_cpus(self) -> set:
+        if self.chosen_pool == "E-Core":
+            return set(self.pools["e_cores"])
+        return set(self.pools["p_cores"])
+
     def place(self, pids_or_tids: Iterable[int]) -> None:
         if not self.chosen_pool:
             raise RuntimeError("oracle-static setup() must be called before place().")
@@ -396,6 +411,10 @@ class PieLikePolicy(BasePolicy):
                     for fd in fds.values():
                         os.close(fd)
 
+    def launch_cpus(self) -> set:
+        """Initial CPU set the workload must be launched inside."""
+        return set(self.pools["p_cores"]) | set(self.pools["e_cores"])
+
     def on_tick(self) -> None:
         import struct
         for tid, fds in list(self._tid_fds.items()):
@@ -486,6 +505,11 @@ class HassLikePolicy(BasePolicy):
         if self.signature.get("split") == "evaluation":
             raise ValueError("REFUSED: hass-like signature was built from an evaluation variant.")
 
+    def launch_cpus(self) -> set:
+        if self.signature and self.signature.get("preferred_pool") == "E-Core":
+            return set(self.pools["e_cores"])
+        return set(self.pools["p_cores"])
+
     def place(self, pids_or_tids: Iterable[int]) -> None:
         if not self.signature:
             raise RuntimeError("hass-like setup() must be called before place().")
@@ -528,7 +552,7 @@ class _PacerDaemonPolicy(BasePolicy):
         self.workload = workload
         if not os.path.exists(DAEMON_BIN):
             raise FileNotFoundError(f"{DAEMON_BIN} not found. Run 'make all' first.")
-        cmd = [
+        self._base_cmd = [
             DAEMON_BIN,
             "--policy", self.daemon_policy_flag,
             "--interval", str(self.interval_ms),
@@ -540,18 +564,48 @@ class _PacerDaemonPolicy(BasePolicy):
             "--decay-alpha", str(self.decay_alpha),
             "--trial", str(self.trial_index),
         ]
+
+    def _start_daemon(self, target_pid: Optional[int]) -> None:
+        if self.daemon_proc is not None:
+            return
+        cmd = list(self._base_cmd)
+        if target_pid is not None:
+            cmd.extend(["--pid", str(target_pid)])
+        ctrl_cpus = set(self.pools["control_plane_cpus"])
+
+        def _preexec() -> None:
+            os.sched_setaffinity(0, ctrl_cpus)
+
         self.daemon_proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            preexec_fn=_preexec,
         )
         self.daemon_pid = self.daemon_proc.pid
+        time.sleep(0.05)
+        if self.daemon_proc.poll() is None:
+            try:
+                with open(f"/proc/{self.daemon_pid}/comm", "r") as cf:
+                    comm = cf.read().strip()
+                exe = os.readlink(f"/proc/{self.daemon_pid}/exe")
+                if "hybridsched" not in comm or not exe.endswith("hybridsched_daemon"):
+                    raise RuntimeError(
+                        f"Daemon PID {self.daemon_pid} verification failed: comm={comm}, exe={exe}"
+                    )
+            except OSError as exc:
+                raise RuntimeError(f"Could not verify daemon PID {self.daemon_pid}: {exc}")
 
     def place(self, pids_or_tids: Iterable[int]) -> None:
-        # Daemon attaches to target PIDs via --pid or discovery; record placed PIDs.
-        for pid in pids_or_tids:
+        pids = list(pids_or_tids)
+        for pid in pids:
             self.placed_pids.append(pid)
+            _taskset_pid_all_tids(pid, self.allowed_cores_str)
+        if pids:
+            self._start_daemon(pids[0])
 
     def teardown(self) -> Dict[str, object]:
         info = super().teardown()
+        if self.daemon_proc is None and hasattr(self, "_base_cmd"):
+            self._start_daemon(None)
         info["daemon_pid"] = self.daemon_pid
         if self.daemon_proc:
             self.daemon_cpu_time_sec = _read_proc_cpu_time_sec(self.daemon_proc.pid)
