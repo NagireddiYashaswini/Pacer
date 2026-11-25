@@ -16,7 +16,9 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "harness"))
 
 from analyze import analyze, load_and_filter_raw
 from energy_meter import compute_rapl_delta_uj
+from host_guard import check_host_guard
 from run_experiments import check_pie_like_validated, create_session_dir
+from validate_pie_counters import check_direction_and_suspects
 from workloads.base import assert_split_allows
 
 
@@ -90,6 +92,45 @@ class TestHarnessGuards(unittest.TestCase):
             ok, msg = check_pie_like_validated(os.path.join(tmp, "nonexistent.json"))
             self.assertFalse(ok)
             self.assertIn("excluded", msg)
+
+    def test_host_guard_checks(self):
+        ok = check_host_guard(
+            pid1_comm="systemd",
+            pid1_cgroup="0::/init.scope",
+            cpus_allowed_str="17,35",
+            control_plane_cpus={17, 35},
+        )
+        self.assertEqual(ok, [])
+
+        fails = check_host_guard(
+            pid1_comm="exe",
+            pid1_cgroup="0::/user.slice/app.scope",
+            cpus_allowed_str="0-35",
+            control_plane_cpus={17, 35},
+        )
+        self.assertEqual(len(fails), 3)
+        self.assertIn("(a)", fails[0])
+        self.assertIn("(b)", fails[1])
+        self.assertIn("(c)", fails[2])
+
+    def test_pie_direction_and_suspect_flags(self):
+        # Reproduce L1D_PEND_MISS.PENDING compute > memory + 3 counters near cycles
+        comp = {
+            "L1D_PEND_MISS.PENDING": (2592148527, 775000000),
+            "CYCLE_ACTIVITY.STALLS_MEM_ANY": (49028240, 775000000),
+            "CYCLE_ACTIVITY.STALLS_TOTAL": (49416393, 775000000),
+            "RESOURCE_STALLS.ANY": (178886078, 775000000),
+        }
+        mem = {
+            "L1D_PEND_MISS.PENDING": (702386810, 775000000),
+            "CYCLE_ACTIVITY.STALLS_MEM_ANY": (764369035, 775000000),
+            "CYCLE_ACTIVITY.STALLS_TOTAL": (764696125, 775000000),
+            "RESOURCE_STALLS.ANY": (764489362, 775000000),
+        }
+        rep, suspects, valid = check_direction_and_suspects(comp, mem)
+        self.assertFalse(valid)
+        self.assertFalse(rep["L1D_PEND_MISS.PENDING"]["direction_ok"])
+        self.assertTrue(any("within 5%" in s for s in suspects))
 
 
 if __name__ == "__main__":
