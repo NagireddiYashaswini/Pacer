@@ -22,19 +22,28 @@ A production-grade, user-space adaptive CPU scheduling daemon (`hybridsched`) de
 
 ---
 
-## Research Benchmarking Results
+## Evaluation Workflow (Host Terminal)
 
-Evaluated on an **Intel Xeon w5-2565X** (36 threads partitioned into P-cores `0-7` and E-cores `8-17`):
+> **Important:** Real evaluations must be executed from a host terminal pinned to the control-plane CPUs (`taskset -c 17,35` per `config/pools.yaml`). `harness/host_guard.py` enforces host PID/cgroup namespaces and control-plane affinity.
 
-| Workload | Scheduling Policy | Wall Time (s) | Energy (J) | EDP ($J \cdot s$) | Speedup vs CFS | EDP Reduction (%) | Migrations |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Dynamic Phase-Shifting** | Default Linux (CFS) | 4.048 | 186.2 | 753.83 | 1.00x | 0.0% | 0 |
-| | Static P-Core Pool | 4.051 | 218.7 | 885.96 | 1.00x | -17.5% | 0 |
-| | Static E-Core Pool | 4.047 | 89.0 | 360.32 | 1.00x | 52.2% | 0 |
-| | **Adaptive hybridsched** | 4.041 | 127.3 | 514.31 | 1.00x | **31.8%** | **5** |
-| **Multi-Tenant (2x Comp + 2x Mem)** | Default Linux (CFS) | 1.267 | 58.3 | 73.81 | 1.00x | 0.0% | 0 |
-| | Static P-Core Pool | 1.173 | 63.3 | 74.31 | 1.08x | -0.7% | 0 |
-| | **Adaptive hybridsched** | 1.274 | 40.1 | 51.14 | 0.99x | **30.7%** | **2** |
+1. **Verify host environment:**
+   ```bash
+   taskset -c 17,35 ./scripts/verify_env.sh
+   ```
+2. **Run a smoke session (`results/smoke/<session_id>/`):**
+   ```bash
+   taskset -c 17,35 python3 harness/run_experiments.py --smoke --session-id smoke_01
+   ```
+3. **Run a full evaluation session (`results/raw/<session_id>/`):**
+   ```bash
+   taskset -c 17,35 python3 harness/run_experiments.py --config config/experiment.yaml --session-id eval_01
+   ```
+4. **Analyze results & generate LaTeX tables + figures:**
+   ```bash
+   python3 harness/analyze.py
+   python3 harness/plot_results.py
+   ```
+   Outputs: `results/analysis_summary.csv`, `results/analysis_pairwise.csv`, `results/table_summary.tex`, `results/table_pairwise.tex`, and `results/fig1_edp_comparison.png`–`fig4_probe_overhead.png`.
 
 ---
 
@@ -88,9 +97,9 @@ make clean && make all
 ```
 This script launches the daemon, runs an alternating phase workload (`bench_phase`), and prints the real-time core migration events to the terminal.
 
-### 3. Run the Comprehensive Evaluation Matrix
+### 3. Run Unit Tests
 ```bash
-python3 harness/evaluate_scheduler.py --compute-iters 600 --mem-iters 15000000 --phases 4 --phase-dur 1.0
+make test
 ```
 
 ### 4. Generate Publication-Quality Visualizations
@@ -99,5 +108,8 @@ python3 harness/plot_results.py
 ```
 The figures will be saved in `results/`:
 - `results/fig1_edp_comparison.png`
+- `results/fig2_telemetry_timeline.png`
+- `results/fig3_speedup_vs_mpki.png`
+- `results/fig4_probe_overhead.png`
 - `results/fig2_telemetry_timeline.png`
 - `results/fig3_speedup_vs_mpki.png`
