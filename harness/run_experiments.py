@@ -262,7 +262,7 @@ def run_session(
         variants_all["bench_compute_smoke"] = {
             "workload": "bench_compute",
             "split": "tuning",
-            "args": ["--iterations", "0", "--duration", "5.0", "--matrix-size", "128"],
+            "args": ["--iterations", "35000", "--matrix-size", "128"],
         }
     else:
         for wk in wl_keys:
