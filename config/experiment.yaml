@@ -1,0 +1,43 @@
+# Experiment Session Configuration for harness/run_experiments.py
+# Driven by policies x workloads x trials (randomized policy order per trial block).
+
+session_type: evaluation
+trials: 10
+random_seed: 20261126
+
+# Idle baseline & thermal cooldown
+idle_window_sec: 5.0
+idle_drift_threshold_pct: 10.0
+cooldown_temp_delta_c: 2.0
+cooldown_max_wait_sec: 30.0
+
+# Daemon parameters (selected from tuning split only)
+daemon:
+  interval_ms: 150
+  cooldown_ms: 400
+  hysteresis_ticks: 1
+  probe_window_ticks: 2
+  discard_ticks: 1
+  probe_rate_cap: 0.5
+  decay_alpha: 0.5
+
+policies:
+  - default-linux
+  - static-P
+  - static-E
+  - oracle-static
+  - pie-like
+  - hass-like
+  - pacer-mpki
+  - pacer-speedup
+
+# Variant keys must match config/workload_split.yaml
+workloads:
+  - bench_compute_eval
+  - bench_memory_eval
+  - bench_dram_chase_eval
+  - bench_phase_eval
+  - gapbs_bfs_eval
+  - gapbs_pr_eval
+  - redis_eval
+  - mixed_tenant_eval

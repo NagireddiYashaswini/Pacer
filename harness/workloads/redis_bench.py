@@ -43,9 +43,9 @@ class RedisBenchmarkWorkload(WorkloadWrapper):
         srv_bin, cli_bin = self._find_bins()
         cfg = variant_cfg or {}
         pools = load_pools_config()
-        # Client must NOT share cores with server; default client to last E-core
+        # Client must NOT share cores with server; run on control-plane CPUs
         if client_cpulist is None:
-            client_cpulist = str(pools["e_cores"][-1])
+            client_cpulist = pools["control_plane_cpus_str"]
 
         os.makedirs(run_dir, exist_ok=True)
         srv_out = os.path.join(run_dir, "redis_server.stdout.log")

@@ -5,7 +5,6 @@ Fails loudly if config/pools.yaml is missing or malformed.
 """
 
 import os
-import sys
 from typing import Dict, List
 
 import yaml
@@ -35,24 +34,27 @@ def load_pools_config(path: str = DEFAULT_POOLS_PATH) -> Dict[str, object]:
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"Pool config not found at {path}. "
-            f"Create config/pools.yaml with p_cores, e_cores, excluded_siblings."
+            f"Create config/pools.yaml with p_cores, e_cores, control_plane_cpus, excluded_siblings."
         )
     with open(path, "r") as f:
         data = yaml.safe_load(f) or {}
 
-    for key in ("p_cores", "e_cores", "excluded_siblings"):
+    for key in ("p_cores", "e_cores", "control_plane_cpus", "excluded_siblings"):
         if key not in data or not str(data[key]).strip():
             raise ValueError(f"Missing required key '{key}' in {path}")
 
     p_str = str(data["p_cores"]).strip()
     e_str = str(data["e_cores"]).strip()
+    cp_str = str(data["control_plane_cpus"]).strip()
     excl_str = str(data["excluded_siblings"]).strip()
 
     return {
         "p_cores_str": p_str,
         "e_cores_str": e_str,
+        "control_plane_cpus_str": cp_str,
         "excluded_siblings_str": excl_str,
         "p_cores": parse_cpulist(p_str),
         "e_cores": parse_cpulist(e_str),
+        "control_plane_cpus": parse_cpulist(cp_str),
         "excluded_siblings": parse_cpulist(excl_str),
     }
